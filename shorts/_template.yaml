@@ -1,56 +1,72 @@
 id: "000"
 title: "Tytul roboczy"
 series: "Nie Otwieraj"
-status: "approved"
+status: "draft"
 fictional: true
 archive17: false
 image_model: "z-image-turbo"
+# Opcjonalny seed. Gdy brak, pipeline wyliczy deterministyczny seed z ID i tytułu.
+# seed: 1700317
 visual_style: >-
-  cinematic photorealistic Polish dark mystery, documentary thriller,
-  restrained psychological horror, realistic Polish architecture,
-  muted colors, subtle film grain, no text, no watermark
+  fictional cinematic photorealistic Polish dark mystery, documentary thriller,
+  restrained psychological horror, authentic Polish environment, realistic textures,
+  muted colors, subtle film grain, no text, no subtitles, no watermark, vertical composition
+
+# UWAGA: narration musi być praktycznie identycznym połączeniem scenes[].text.
+# To zabezpiecza przed sytuacją, w której zatwierdzony skrypt różni się od TTS.
 narration: >-
-  Wklej tutaj zatwierdzony tekst lektorski.
+  Fragment narracji sceny pierwszej powinien znaleźć się tutaj.
+  Fragment narracji sceny drugiej powinien być jego bezpośrednią kontynuacją.
+  Fragment narracji sceny trzeciej rozwija jeden główny pomysł historii.
+  Fragment narracji sceny czwartej zwiększa napięcie bez dokładania nowego potwora.
+  Fragment narracji sceny piątej pokazuje niepokojący szczegół wynikający z wcześniejszych informacji.
+  Fragment narracji sceny szóstej prowadzi do odkrycia, ale jeszcze go całkowicie nie wyjaśnia.
+  Fragment narracji sceny siódmej przygotowuje twist oraz pauzę przed jego ujawnieniem.
+  Fragment narracji sceny ósmej zawiera twist wynikający z informacji zasianych wcześniej.
+
 scenes:
   - id: 1
-    text: "Fragment narracji sceny 1"
-    prompt: "Opis sceny 1"
+    text: "Fragment narracji sceny pierwszej powinien znaleźć się tutaj."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 1"
     motion: "push_in"
   - id: 2
-    text: "Fragment narracji sceny 2"
-    prompt: "Opis sceny 2"
+    text: "Fragment narracji sceny drugiej powinien być jego bezpośrednią kontynuacją."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 2"
     motion: "pan_left"
   - id: 3
-    text: "Fragment narracji sceny 3"
-    prompt: "Opis sceny 3"
+    text: "Fragment narracji sceny trzeciej rozwija jeden główny pomysł historii."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 3"
     motion: "push_in"
   - id: 4
-    text: "Fragment narracji sceny 4"
-    prompt: "Opis sceny 4"
+    text: "Fragment narracji sceny czwartej zwiększa napięcie bez dokładania nowego potwora."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 4"
     motion: "static"
   - id: 5
-    text: "Fragment narracji sceny 5"
-    prompt: "Opis sceny 5"
+    text: "Fragment narracji sceny piątej pokazuje niepokojący szczegół wynikający z wcześniejszych informacji."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 5"
     motion: "pan_right"
   - id: 6
-    text: "Fragment narracji sceny 6"
-    prompt: "Opis sceny 6"
+    text: "Fragment narracji sceny szóstej prowadzi do odkrycia, ale jeszcze go całkowicie nie wyjaśnia."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 6"
     motion: "push_in"
   - id: 7
-    text: "Fragment narracji sceny 7"
-    prompt: "Opis sceny 7"
+    text: "Fragment narracji sceny siódmej przygotowuje twist oraz pauzę przed jego ujawnieniem."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 7, wizualna wskazówka przed twistem"
     motion: "static"
   - id: 8
-    text: "Fragment narracji sceny 8"
-    prompt: "Opis sceny 8 — najmocniejsza wskazowka twistu"
+    text: "Fragment narracji sceny ósmej zawiera twist wynikający z informacji zasianych wcześniej."
+    prompt: "Opis osobnego natywnego kadru 9:16 dla sceny 8 — najmocniejszy wizualny clue twistu"
     motion: "slow_push"
+
 subtitles:
   max_words: 5
   uppercase: true
+
 sound:
   ambience: ""
   impact_before_end: true
   silence_before_twist_ms: 700
+
 output:
   width: 1080
   height: 1920
