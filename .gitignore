@@ -7,15 +7,23 @@ ComfyUI/
 *.mp3
 *.srt
 *.ass
+*.safetensors
+*.ckpt
+*.pt
+*.pth
 
 # Python
 .venv/
+venv/
 __pycache__/
 *.pyc
 
-# Local secrets and machine config
+# Local runtime / secrets
+CSP/
+actions-runner/
 .env
 config/local.yaml
+*.token
 
 # Windows
 Thumbs.db
