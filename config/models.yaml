@@ -1,37 +1,63 @@
 comfyui:
   base_url: "http://127.0.0.1:8188"
   poll_seconds: 2
-  timeout_seconds: 900
+  timeout_seconds: 1200
+  free_after_images: true
 
 image_models:
   z-image-turbo:
     workflow: "workflows/comfyui/z-image-turbo-api.json"
-    prompt_node: "PROMPT_NODE_ID"
-    seed_node: "SEED_NODE_ID"
-    save_node: "SAVE_NODE_ID"
     width: 768
     height: 1344
     steps: 8
+    models:
+      unet: "z_image_turbo_int8_convrot.safetensors"
+      clip: "qwen_3_4b_fp4_mixed.safetensors"
+      vae: "ae.safetensors"
+    bindings:
+      prompt: {node: "27", input: "text"}
+      seed: {node: "3", input: "seed"}
+      steps: {node: "3", input: "steps"}
+      width: {node: "13", input: "width"}
+      height: {node: "13", input: "height"}
+      unet: {node: "28", input: "unet_name"}
+      clip: {node: "30", input: "clip_name"}
+      vae: {node: "29", input: "vae_name"}
+      save_prefix: {node: "9", input: "filename_prefix"}
+
   flux2-klein:
     workflow: "workflows/comfyui/flux2-klein-api.json"
-    prompt_node: "PROMPT_NODE_ID"
-    seed_node: "SEED_NODE_ID"
-    save_node: "SAVE_NODE_ID"
     width: 768
     height: 1344
     steps: 8
+    # Adapter pozostaje opcjonalny. Model może zostać dodany później bez zmian
+    # w pozostałych etapach pipeline'u.
+    models: {}
+    bindings: {}
 
 tts:
   engine: "chatterbox"
   language: "pl"
+  model_version: "v3"
+  device: "cuda"
   reference_audio: "assets/voice/narrator_reference.wav"
+  exaggeration: 0.55
+  cfg_weight: 0.35
+  temperature: 0.8
+  repetition_penalty: 1.2
+  pause_ms_between_scenes: 60
 
 whisper:
   model: "small"
   language: "pl"
+  device: "cuda"
+  compute_type: "int8_float16"
 
 render:
   ffmpeg: "ffmpeg"
+  ffprobe: "ffprobe"
   video_codec: "h264_nvenc"
   audio_codec: "aac"
   audio_bitrate: "192k"
+  video_bitrate: "8M"
+  preset: "p5"
