@@ -1,0 +1,109 @@
+id: "001"
+title: "Drzwi 0"
+series: "Nie Otwieraj"
+status: "ready"
+fictional: true
+archive17: false
+image_model: "z-image-turbo"
+seed: 1700317
+visual_style: >-
+  fictional cinematic photorealistic Polish dark mystery, serious documentary thriller,
+  basement of an aging Polish apartment block, authentic post-communist architecture,
+  cold fluorescent practical lighting, damp concrete, muted charcoal grey and aged beige,
+  restrained psychological horror, realistic textures, subtle film grain, no gore,
+  no supernatural creature visible, no text, no subtitles, no watermark, vertical composition
+narration: >-
+  W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
+  Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
+  Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
+  Wieczorem jeden z lokatorów usłyszał zza drzwi trzy spokojne puknięcia.
+  Nie otworzył. Następnego ranka tabliczka z zerem leżała na podłodze, a na drzwiach ktoś wydrapał numer jego mieszkania.
+  Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
+  Na jego końcu stały identyczne drzwi jak te do mieszkania lokatora.
+  Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
+scenes:
+  - id: 1
+    text: >-
+      W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
+    prompt: >-
+      Wide documentary shot of a narrow basement corridor in an old Polish apartment block,
+      raw concrete walls, exposed pipes, one newly appeared plain wooden door at the far end,
+      believable mundane environment, no people, uneasy but subtle, 35mm lens
+    motion: "push_in"
+
+  - id: 2
+    text: >-
+      Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
+    prompt: >-
+      Closer view of the same plain basement door squeezed unnaturally between an old yellow gas pipe
+      and rough concrete wall, tiny blank-looking metal number plate positioned at eye level,
+      maintain exactly the same corridor and door design as previous scene, documentary close shot
+    motion: "slow_push"
+
+  - id: 3
+    text: >-
+      Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
+    prompt: >-
+      Middle-aged Polish apartment administrator in dark work jacket standing at a small basement utility table,
+      studying worn architectural floor plans under fluorescent light, the same mysterious door visible blurred behind him,
+      serious realistic investigative mood, no readable text on plans
+    motion: "pan_right"
+
+  - id: 4
+    text: >-
+      Wieczorem jeden z lokatorów usłyszał zza drzwi trzy spokojne puknięcia.
+    prompt: >-
+      Evening in the identical basement corridor, adult male tenant in ordinary dark jacket frozen several steps from the door,
+      listening cautiously, his face only partly visible in profile, door closed, empty shadows around it,
+      grounded psychological tension, no monster
+    motion: "push_in"
+
+  - id: 5
+    text: >-
+      Nie otworzył. Następnego ranka tabliczka z zerem leżała na podłodze, a na drzwiach ktoś wydrapał numer jego mieszkania.
+    prompt: >-
+      Morning close-up at floor level in the same corridor, a small fallen metal number plate on dusty concrete near the door,
+      fresh shallow scratches visible in the wood where a number has been carved but not legible to camera,
+      realistic evidence-photo framing, cold daylight leaking from stairwell
+    motion: "static"
+
+  - id: 6
+    text: >-
+      Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
+    prompt: >-
+      Same basement door now open, Polish locksmith and administrator seen from behind at threshold,
+      revealing an impossibly narrow unfinished concrete corridor extending into darkness with one bare tungsten bulb,
+      architecture remains plausible and restrained, no creature, cinematic documentary realism
+    motion: "push_in"
+
+  - id: 7
+    text: >-
+      Na jego końcu stały identyczne drzwi jak te do mieszkania lokatora.
+    prompt: >-
+      Long telephoto view straight down the newly revealed narrow concrete corridor,
+      a normal Polish apartment entrance door standing alone at the distant end under weak bare bulb,
+      no people in frame, oppressive symmetry, subtle realistic depth, strongest visual clue before twist
+    motion: "slow_push"
+
+  - id: 8
+    text: >-
+      Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
+    prompt: >-
+      Ground-floor stairwell of the same aging Polish apartment block, administrator and tenant standing motionless before
+      the tenant's familiar apartment entrance door, a small newly attached metal plate on the door where the apartment number should be,
+      their body language tense, plate visible but avoid readable typography, final documentary horror frame, no monster
+    motion: "slow_push"
+
+subtitles:
+  max_words: 5
+  uppercase: true
+
+sound:
+  ambience: "basement_roomtone"
+  impact_before_end: true
+  silence_before_twist_ms: 700
+
+output:
+  width: 1080
+  height: 1920
+  fps: 30
