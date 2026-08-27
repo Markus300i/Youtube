@@ -53,8 +53,13 @@ try {
         throw 'Brak svc.cmd w katalogu runnera.'
     }
 
-    # svc.cmd install jest idempotentny tylko częściowo, więc sprawdzamy usługę.
-    $service = Get-Service | Where-Object { $_.Name -like 'actions.runner.*' -and $_.PathName -like "*$RunnerRoot*" } | Select-Object -First 1
+    # Get-Service nie zwraca PathName. Win32_Service pozwala sprawdzić,
+    # czy istniejąca usługa faktycznie wskazuje ten katalog runnera.
+    $escapedRoot = [Regex]::Escape($RunnerRoot)
+    $service = Get-CimInstance Win32_Service |
+        Where-Object { $_.Name -like 'actions.runner.*' -and $_.PathName -match $escapedRoot } |
+        Select-Object -First 1
+
     if (-not $service) {
         & .\svc.cmd install
         if ($LASTEXITCODE -ne 0) {
