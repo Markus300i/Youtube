@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument("--cfg-weight", type=float, default=0.35)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--repetition-penalty", type=float, default=1.2)
-    parser.add_argument("--pause-ms", type=int, default=60)
+    parser.add_argument("--default-pause-ms", type=int, default=60)
     args = parser.parse_args()
 
     segments_path = Path(args.segments_json)
@@ -58,9 +58,6 @@ def main() -> None:
     timings_path.parent.mkdir(parents=True, exist_ok=True)
     segment_dir = output.parent / "segments"
     segment_dir.mkdir(parents=True, exist_ok=True)
-
-    pause_samples = int(model.sr * max(0, args.pause_ms) / 1000)
-    pause = torch.zeros((1, pause_samples), dtype=torch.float32)
 
     full_parts: list[torch.Tensor] = []
     timeline: list[dict] = []
@@ -98,9 +95,12 @@ def main() -> None:
         full_parts.append(wav)
         cursor_samples = speech_end_samples
 
-        has_pause = index < len(segments) - 1 and pause_samples > 0
-        if has_pause:
-            full_parts.append(pause)
+        pause_ms = int(segment.get("pause_after_ms", args.default_pause_ms))
+        if index == len(segments) - 1:
+            pause_ms = 0
+        pause_samples = int(model.sr * max(0, pause_ms) / 1000)
+        if pause_samples > 0:
+            full_parts.append(torch.zeros((1, pause_samples), dtype=torch.float32))
             cursor_samples += pause_samples
 
         end = cursor_samples / model.sr
@@ -113,6 +113,7 @@ def main() -> None:
                 "end": round(end, 4),
                 "duration": round(end - start, 4),
                 "speech_duration": round(speech_end - start, 4),
+                "pause_after_ms": pause_ms,
             }
         )
 
@@ -122,7 +123,7 @@ def main() -> None:
     timings = {
         "sample_rate": model.sr,
         "duration": round(full_wav.shape[-1] / model.sr, 4),
-        "pause_ms_between_scenes": int(args.pause_ms),
+        "default_pause_ms_between_scenes": int(args.default_pause_ms),
         "scenes": timeline,
     }
     timings_path.write_text(
