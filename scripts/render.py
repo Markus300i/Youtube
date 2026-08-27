@@ -119,7 +119,9 @@ def main() -> None:
 
     out_dir = short_output_dir(short)
     images_dir = out_dir / "images"
-    audio = out_dir / "audio" / "voice.wav"
+    voice_audio = out_dir / "audio" / "voice.wav"
+    mixed_audio = out_dir / "audio" / "final_mix.wav"
+    audio = mixed_audio if mixed_audio.exists() else voice_audio
     subtitles_ass = out_dir / "subtitles.ass"
     subtitles_srt = out_dir / "subtitles.srt"
     final = out_dir / "final.mp4"
@@ -130,14 +132,18 @@ def main() -> None:
         image = images_dir / f"scene-{i:02d}.png"
         if not image.exists():
             raise FileNotFoundError(image)
-    if not audio.exists():
-        raise FileNotFoundError(audio)
+    if not voice_audio.exists():
+        raise FileNotFoundError(voice_audio)
+    if audio == mixed_audio:
+        print(f"AUDIO: używam sound designu {mixed_audio}")
+    else:
+        print("AUDIO: final_mix.wav nie istnieje — używam samego voice.wav")
 
-    audio_duration = ffprobe_duration(audio, ffprobe=ffprobe)
-    durations = load_scene_durations(out_dir, audio_duration)
+    # Timingi obrazu liczymy z czystej narracji / pliku TTS, nie z ewentualnego
+    # miksu ambience, aby zmiany scen były zawsze zsynchronizowane z lektorem.
+    voice_duration = ffprobe_duration(voice_audio, ffprobe=ffprobe)
+    durations = load_scene_durations(out_dir, voice_duration)
 
-    # Renderujemy osobne klipy, dzięki czemu każda zmiana obrazu trafia dokładnie
-    # w granicę segmentu TTS zamiast dzielić film na osiem równych części.
     clips: list[Path] = []
     for i, scene in enumerate(short["scenes"], start=1):
         duration = durations[i - 1]
