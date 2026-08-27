@@ -4,6 +4,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -129,6 +130,7 @@ def main() -> None:
     short = load_yaml(args.short_file)
     config = load_yaml("config/models.yaml")
     comfy = config["comfyui"]
+    base_url = os.getenv("CSP_COMFY_URL", comfy["base_url"]).rstrip("/")
     model_cfg = config["image_models"][short["image_model"]]
 
     workflow_path = ROOT / model_cfg["workflow"]
@@ -147,7 +149,7 @@ def main() -> None:
     output_dir = short_output_dir(short) / "images"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    wait_for_comfy(comfy["base_url"])
+    wait_for_comfy(base_url)
 
     # 8 GB VRAM: tylko jedna scena jest jednocześnie w kolejce.
     base_seed = deterministic_seed(short)
@@ -189,18 +191,18 @@ def main() -> None:
             f"GENERATE scene {scene_id}/8 via {short['image_model']} "
             f"({width}x{height}, {steps} steps, seed={base_seed + scene_id})"
         )
-        prompt_id = submit_prompt(comfy["base_url"], workflow)
+        prompt_id = submit_prompt(base_url, workflow)
         history = wait_history(
-            comfy["base_url"],
+            base_url,
             prompt_id,
             timeout=int(comfy.get("timeout_seconds", 1200)),
             poll=int(comfy.get("poll_seconds", 2)),
         )
-        download_first_image(comfy["base_url"], history, save_node, target)
+        download_first_image(base_url, history, save_node, target)
         print(f"SAVED {target}")
 
     if comfy.get("free_after_images", True):
-        free_comfy_memory(comfy["base_url"])
+        free_comfy_memory(base_url)
 
 
 if __name__ == "__main__":
