@@ -27,6 +27,7 @@ def main() -> None:
 
     short = load_yaml(args.short_file)
     cfg = load_yaml("config/models.yaml")["tts"]
+    sound_cfg = short.get("sound") or {}
     out_dir = short_output_dir(short) / "audio"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -34,10 +35,23 @@ def main() -> None:
     timings = out_dir / "tts-timings.json"
     segments_json = out_dir / "tts-segments.json"
 
-    segments = [
-        {"id": int(scene["id"]), "text": str(scene["text"]).strip()}
-        for scene in short["scenes"]
-    ]
+    default_pause = int(cfg.get("pause_ms_between_scenes", 60))
+    twist_pause = int(sound_cfg.get("silence_before_twist_ms", 0))
+
+    segments = []
+    for index, scene in enumerate(short["scenes"]):
+        pause_after = default_pause if index < len(short["scenes"]) - 1 else 0
+        # Scena 8 jest twistem. Pauza po scenie 7 zastępuje zwykły odstęp.
+        if index == 6 and twist_pause > 0:
+            pause_after = twist_pause
+        segments.append(
+            {
+                "id": int(scene["id"]),
+                "text": str(scene["text"]).strip(),
+                "pause_after_ms": pause_after,
+            }
+        )
+
     segments_json.write_text(
         json.dumps({"segments": segments}, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -74,8 +88,8 @@ def main() -> None:
         str(cfg.get("temperature", 0.8)),
         "--repetition-penalty",
         str(cfg.get("repetition_penalty", 1.2)),
-        "--pause-ms",
-        str(cfg.get("pause_ms_between_scenes", 60)),
+        "--default-pause-ms",
+        str(default_pause),
     ]
 
     reference_path = resolve_reference(cfg)
