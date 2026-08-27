@@ -8,7 +8,26 @@ if (-not (Test-Path $ComfyUIPath)) {
     throw "Nie znaleziono ComfyUI: $ComfyUIPath"
 }
 
-$modelsRoot = Join-Path $ComfyUIPath 'models'
+# Obsługujemy zarówno klasyczne/portable ComfyUI:
+#   <root>\main.py + <root>\models
+# jak i aktualny Comfy Desktop managed install:
+#   <install>\ComfyUI\main.py + <install>\ComfyUI\models
+$resolvedRoot = [System.IO.Path]::GetFullPath($ComfyUIPath)
+$comfyRoot = $resolvedRoot
+
+if (-not (Test-Path (Join-Path $comfyRoot 'main.py'))) {
+    $nested = Join-Path $resolvedRoot 'ComfyUI'
+    if (Test-Path (Join-Path $nested 'main.py')) {
+        $comfyRoot = $nested
+    } else {
+        throw "Nie znaleziono main.py w $resolvedRoot ani w $nested. Wskaż katalog instalacji ComfyUI/Comfy Desktop."
+    }
+}
+
+$modelsRoot = Join-Path $comfyRoot 'models'
+Write-Host "ComfyUI root: $comfyRoot"
+Write-Host "Models root:  $modelsRoot"
+
 $downloads = @(
     @{
         Name = 'Z-Image Turbo INT8 ConvRot'
@@ -61,4 +80,5 @@ foreach ($item in $downloads) {
 
 Write-Host ''
 Write-Host 'Modele Z-Image są gotowe.'
+Write-Host "Katalog modeli: $modelsRoot"
 Write-Host 'Uruchom ponownie ComfyUI, jeśli było otwarte podczas instalacji.'
