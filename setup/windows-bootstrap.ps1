@@ -50,7 +50,24 @@ if (-not (Test-Path $venvPython)) {
 & $venvPython -m pip install -r requirements.txt
 
 Write-Host 'Sprawdzam CUDA dla TTS...'
-& $venvPython -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'available', torch.cuda.is_available()); assert torch.cuda.is_available(), 'CUDA niedostępna w środowisku CSP'"
+# Używamy tymczasowego pliku zamiast `python -c`, ponieważ Windows PowerShell 5.1
+# potrafi błędnie parsować bardziej złożone jednolinijkowe argumenty Pythona.
+$cudaCheckPath = Join-Path $CspRoot 'check-cuda.py'
+$cudaCheck = @'
+import torch
+print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA unavailable in CSP environment")
+'@
+Set-Content -Path $cudaCheckPath -Value $cudaCheck -Encoding ASCII
+try {
+    & $venvPython $cudaCheckPath
+    if ($LASTEXITCODE -ne 0) {
+        throw 'CUDA niedostępna w środowisku CSP.'
+    }
+} finally {
+    Remove-Item $cudaCheckPath -Force -ErrorAction SilentlyContinue
+}
 
 [Environment]::SetEnvironmentVariable('CSP_PYTHON', $venvPython, 'User')
 [Environment]::SetEnvironmentVariable('CSP_OUTPUT_DIR', $outputDir, 'User')
