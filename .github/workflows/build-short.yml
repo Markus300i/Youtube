@@ -49,6 +49,11 @@ jobs:
           "PYTHON_BIN=$candidate" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $candidate --version
 
+      - name: Ensure local ComfyUI is running
+        if: ${{ !inputs.skip_images || !inputs.skip_preflight }}
+        shell: powershell
+        run: 'powershell -ExecutionPolicy Bypass -File setup/ensure-comfyui.ps1'
+
       - name: Preflight hardware and local services
         if: ${{ !inputs.skip_preflight }}
         shell: powershell
