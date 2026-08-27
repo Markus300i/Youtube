@@ -1,0 +1,22 @@
+# Local models / generated media
+models/
+output/
+ComfyUI/
+*.mp4
+*.wav
+*.mp3
+*.srt
+*.ass
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local secrets and machine config
+.env
+config/local.yaml
+
+# Windows
+Thumbs.db
+Desktop.ini
