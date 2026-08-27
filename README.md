@@ -6,7 +6,7 @@ Lokalny pipeline produkcji fikcyjnych YouTube Shorts sterowany przez GitHub Acti
 
 Po zatwierdzeniu pliku Shorta pipeline wykonuje lokalnie:
 
-`YAML -> walidacja -> 8 obrazów -> polski lektor -> timestampy -> napisy -> ruch scen -> NVENC -> final.mp4`
+`YAML -> walidacja -> 8 obrazów -> polski lektor -> timestampy -> napisy -> sound design -> ruch scen -> NVENC -> final.mp4`
 
 Podstawowa wersja nie wymaga płatnych API. Obliczenia wykonuje komputer produkcyjny.
 
@@ -25,7 +25,7 @@ Podstawowa wersja nie wymaga płatnych API. Obliczenia wykonuje komputer produkc
 - **Z-Image Turbo** — domyślny generator obrazu
 - **Chatterbox Multilingual V3** — polski TTS / voice cloning
 - **faster-whisper** — timestampy słów
-- **FFmpeg + NVENC + libass** — montaż, ruch i napisy
+- **FFmpeg + NVENC + libass** — montaż, ruch, sound design i napisy
 
 ### Z-Image pod 8 GB VRAM
 
@@ -47,6 +47,7 @@ Domyślnie:
 C:\CSP\venv\                     Python/TTS/Whisper
 C:\CSP\output\                   obrazy, WAV, napisy, final.mp4
 C:\CSP\voice\narrator_reference.wav
+C:\CSP\actions-runner\           GitHub self-hosted runner
 C:\ComfyUI\                       ComfyUI + modele
 ```
 
@@ -135,17 +136,25 @@ Pipeline nie powinien być uruchamiany produkcyjnie, dopóki preflight nie zako�
 
 ## 6. GitHub self-hosted runner
 
-Dodaj do repozytorium Windows self-hosted runner i nadaj mu dodatkową etykietę:
+W GitHub otwórz:
 
-```text
-csp
+`Settings -> Actions -> Runners -> New self-hosted runner`
+
+i skopiuj krótkotrwały token rejestracyjny. Następnie uruchom **PowerShell jako Administrator**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File setup/install-github-runner.ps1 -Token "TU_WKLEJ_TOKEN"
 ```
+
+Skrypt sam pobiera najnowszy Windows x64 GitHub Actions Runner, rejestruje go dla repozytorium, dodaje etykietę `csp` i uruchamia jako usługę Windows.
 
 Job oczekuje etykiet:
 
 ```text
 self-hosted, windows, x64, csp
 ```
+
+Token jest używany wyłącznie podczas rejestracji i skrypt go nie zapisuje.
 
 Po bootstrapie zrestartuj runner, aby proces przejął zmienne środowiskowe.
 
@@ -169,7 +178,23 @@ Następnie w GitHub:
 
 Domyślnym plikiem jest `shorts/001-drzwi-0.yaml`.
 
-## 8. Wynik
+## 8. Sound design v1
+
+Sound design jest wykonywany lokalnie przez FFmpeg i nie wymaga biblioteki płatnych efektów.
+
+Aktualnie obsługuje:
+
+- subtelny proceduralny roomtone,
+- niski drone,
+- osobny profil dla wnętrza/piwnicy i lasu,
+- rzeczywistą ciszę przed twistem,
+- niski impact dokładnie na wejściu sceny 8.
+
+Whisper analizuje **czysty `voice.wav`**, a efekty są dodawane później do `final_mix.wav`, więc ambience nie pogarsza synchronizacji napisów.
+
+To jest bezpieczny fallback produkcyjny. W przyszłości proceduralne efekty można zastąpić własną biblioteką SFX bez zmiany reszty pipeline'u.
+
+## 9. Wynik
 
 Gotowy film pojawi się lokalnie, np.:
 
@@ -182,6 +207,7 @@ W tym samym katalogu pozostają materiały diagnostyczne:
 ```text
 images\scene-01.png ... scene-08.png
 audio\voice.wav
+audio\final_mix.wav
 audio\segments\scene-01.wav ... scene-08.wav
 audio\tts-timings.json
 subtitles.srt
