@@ -40,7 +40,7 @@ tts:
   language: "pl"
   model_version: "v3"
   device: "cuda"
-  reference_audio: "assets/voice/narrator_reference.wav"
+  reference_audio: "C:/CSP/voice/narrator_reference.wav"
   exaggeration: 0.55
   cfg_weight: 0.35
   temperature: 0.8
