@@ -55,9 +55,13 @@ Write-Host 'Sprawdzam CUDA dla TTS...'
 [Environment]::SetEnvironmentVariable('CSP_PYTHON', $venvPython, 'User')
 [Environment]::SetEnvironmentVariable('CSP_OUTPUT_DIR', $outputDir, 'User')
 [Environment]::SetEnvironmentVariable('CSP_COMFYUI_PATH', $ComfyUIPath, 'User')
+[Environment]::SetEnvironmentVariable('CSP_COMFY_URL', 'http://127.0.0.1:8188', 'User')
 [Environment]::SetEnvironmentVariable('CSP_VOICE_REFERENCE', (Join-Path $voiceDir 'narrator_reference.wav'), 'User')
 
 if ($InstallModels) {
+    if (-not (Test-Path $ComfyUIPath)) {
+        throw "Nie znaleziono ComfyUI pod $ComfyUIPath. Zainstaluj ComfyUI lub podaj poprawny -ComfyUIPath."
+    }
     & "$PSScriptRoot\install-zimage.ps1" -ComfyUIPath $ComfyUIPath
 }
 
@@ -68,5 +72,8 @@ Write-Host "Output:     $outputDir"
 Write-Host "Voice ref:  $(Join-Path $voiceDir 'narrator_reference.wav')"
 Write-Host "ComfyUI:    $ComfyUIPath"
 Write-Host ''
-Write-Host 'Po pierwszej konfiguracji zrestartuj usługę GitHub Runner, aby przejęła zmienne użytkownika.'
-Write-Host 'Następnie uruchom: python scripts/preflight.py'
+Write-Host 'Następne kroki:'
+Write-Host '1. Uruchom ComfyUI na http://127.0.0.1:8188.'
+Write-Host "2. Uruchom: $venvPython scripts\preflight.py"
+Write-Host '3. Jeżeli nie masz runnera, pobierz token z Settings -> Actions -> Runners i uruchom setup\install-github-runner.ps1.'
+Write-Host '4. Po instalacji/resecie zmiennych zrestartuj usługę GitHub Runner.'
