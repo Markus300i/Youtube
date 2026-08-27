@@ -2,10 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 from common import ROOT, load_yaml, short_output_dir
+
+
+def resolve_reference(cfg: dict) -> Path | None:
+    raw = os.getenv("CSP_VOICE_REFERENCE") or cfg.get("reference_audio")
+    if not raw:
+        return None
+    path = Path(str(raw)).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return path.resolve()
 
 
 def main() -> None:
@@ -66,9 +78,8 @@ def main() -> None:
         str(cfg.get("pause_ms_between_scenes", 60)),
     ]
 
-    reference = cfg.get("reference_audio")
-    if reference:
-        reference_path = ROOT / str(reference)
+    reference_path = resolve_reference(cfg)
+    if reference_path:
         if reference_path.exists():
             cmd += ["--reference", str(reference_path)]
         else:
