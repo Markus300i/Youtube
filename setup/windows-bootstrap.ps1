@@ -1,6 +1,6 @@
 param(
-    [string]$CspRoot = "C:\CSP",
-    [string]$ComfyUIPath = "C:\ComfyUI",
+    [string]$CspRoot = 'C:\CSP',
+    [string]$ComfyUIPath = 'C:\ComfyUI',
     [switch]$InstallModels
 )
 
@@ -8,26 +8,44 @@ $ErrorActionPreference = 'Stop'
 Write-Host '== CSP Automation v1 bootstrap =='
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    throw 'Git nie jest dostępny w PATH.'
+    throw 'Git is not available in PATH.'
 }
+
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-    Write-Warning 'FFmpeg nie jest dostępny w PATH. Zainstaluj pełny build z NVENC i libass.'
+    Write-Warning 'FFmpeg is not available in PATH. Install a full build with NVENC and libass.'
 }
 
 $basePython = $null
+
 if (Get-Command py -ErrorAction SilentlyContinue) {
     try {
-        $basePython = (& py -3.11 -c "import sys; print(sys.executable)").Trim()
-    } catch {}
-}
-if (-not $basePython -and (Get-Command python -ErrorAction SilentlyContinue)) {
-    $version = (& python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
-    if ($version -eq '3.11') {
-        $basePython = (& python -c "import sys; print(sys.executable)").Trim()
+        $candidate = & py -3.11 -c 'import sys; print(sys.executable)'
+        if ($LASTEXITCODE -eq 0 -and $candidate) {
+            $basePython = ($candidate | Select-Object -First 1).Trim()
+        }
+    }
+    catch {
+        $basePython = $null
     }
 }
+
+if (-not $basePython -and (Get-Command python -ErrorAction SilentlyContinue)) {
+    try {
+        $version = & python -c 'import sys; print(str(sys.version_info.major) + "." + str(sys.version_info.minor))'
+        if ($LASTEXITCODE -eq 0 -and ($version | Select-Object -First 1).Trim() -eq '3.11') {
+            $candidate = & python -c 'import sys; print(sys.executable)'
+            if ($LASTEXITCODE -eq 0 -and $candidate) {
+                $basePython = ($candidate | Select-Object -First 1).Trim()
+            }
+        }
+    }
+    catch {
+        $basePython = $null
+    }
+}
+
 if (-not $basePython) {
-    throw 'Wymagany jest Python 3.11. Zainstaluj go i uruchom bootstrap ponownie.'
+    throw 'Python 3.11 is required. Install it and run bootstrap again.'
 }
 
 $venv = Join-Path $CspRoot 'venv'
@@ -35,38 +53,42 @@ $venvPython = Join-Path $venv 'Scripts\python.exe'
 $outputDir = Join-Path $CspRoot 'output'
 $voiceDir = Join-Path $CspRoot 'voice'
 
-New-Item -ItemType Directory -Force -Path $CspRoot, $outputDir, $voiceDir | Out-Null
+New-Item -ItemType Directory -Force -Path $CspRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+New-Item -ItemType Directory -Force -Path $voiceDir | Out-Null
 
 if (-not (Test-Path $venvPython)) {
-    Write-Host "Tworzę trwałe środowisko: $venv"
+    Write-Host ('Creating persistent environment: ' + $venv)
     & $basePython -m venv $venv
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to create CSP virtual environment.'
+    }
 }
 
 & $venvPython -m pip install --upgrade pip setuptools wheel
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to upgrade pip/setuptools/wheel.'
+}
 
-# Chatterbox 0.1.7 wymaga torch/torchaudio 2.6.0. Instalujemy wariant CUDA,
-# żeby pip nie wybrał przypadkiem buildu CPU na Windows.
 & $venvPython -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
-& $venvPython -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to install CUDA PyTorch 2.6.0.'
+}
 
-Write-Host 'Sprawdzam CUDA dla TTS...'
-# Używamy tymczasowego pliku zamiast `python -c`, ponieważ Windows PowerShell 5.1
-# potrafi błędnie parsować bardziej złożone jednolinijkowe argumenty Pythona.
-$cudaCheckPath = Join-Path $CspRoot 'check-cuda.py'
-$cudaCheck = @'
-import torch
-print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())
-if not torch.cuda.is_available():
-    raise SystemExit("CUDA unavailable in CSP environment")
-'@
-Set-Content -Path $cudaCheckPath -Value $cudaCheck -Encoding ASCII
-try {
-    & $venvPython $cudaCheckPath
-    if ($LASTEXITCODE -ne 0) {
-        throw 'CUDA niedostępna w środowisku CSP.'
-    }
-} finally {
-    Remove-Item $cudaCheckPath -Force -ErrorAction SilentlyContinue
+& $venvPython -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to install CSP requirements.'
+}
+
+Write-Host 'Checking CUDA for TTS...'
+& $venvPython -c 'import torch; print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())'
+if ($LASTEXITCODE -ne 0) {
+    throw 'PyTorch CUDA check could not run.'
+}
+
+& $venvPython -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)'
+if ($LASTEXITCODE -ne 0) {
+    throw 'CUDA is not available in the CSP environment.'
 }
 
 [Environment]::SetEnvironmentVariable('CSP_PYTHON', $venvPython, 'User')
@@ -77,20 +99,24 @@ try {
 
 if ($InstallModels) {
     if (-not (Test-Path $ComfyUIPath)) {
-        throw "Nie znaleziono ComfyUI pod $ComfyUIPath. Zainstaluj ComfyUI lub podaj poprawny -ComfyUIPath."
+        throw ('ComfyUI path not found: ' + $ComfyUIPath)
     }
-    & "$PSScriptRoot\install-zimage.ps1" -ComfyUIPath $ComfyUIPath
+
+    $modelInstaller = Join-Path $PSScriptRoot 'install-zimage.ps1'
+    & $modelInstaller -ComfyUIPath $ComfyUIPath
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Z-Image model installation failed.'
+    }
 }
 
 Write-Host ''
-Write-Host 'Bootstrap zakończony.'
-Write-Host "Python CSP: $venvPython"
-Write-Host "Output:     $outputDir"
-Write-Host "Voice ref:  $(Join-Path $voiceDir 'narrator_reference.wav')"
-Write-Host "ComfyUI:    $ComfyUIPath"
+Write-Host 'Bootstrap complete.'
+Write-Host ('Python CSP: ' + $venvPython)
+Write-Host ('Output:     ' + $outputDir)
+Write-Host ('Voice ref:  ' + (Join-Path $voiceDir 'narrator_reference.wav'))
+Write-Host ('ComfyUI:    ' + $ComfyUIPath)
 Write-Host ''
-Write-Host 'Następne kroki:'
-Write-Host '1. Uruchom ComfyUI na http://127.0.0.1:8188.'
-Write-Host "2. Uruchom: $venvPython scripts\preflight.py"
-Write-Host '3. Jeżeli nie masz runnera, pobierz token z Settings -> Actions -> Runners i uruchom setup\install-github-runner.ps1.'
-Write-Host '4. Po instalacji/resecie zmiennych zrestartuj usługę GitHub Runner.'
+Write-Host 'Next steps:'
+Write-Host '1. Start ComfyUI on http://127.0.0.1:8188.'
+Write-Host ('2. Run: ' + $venvPython + ' scripts\preflight.py')
+Write-Host '3. If needed, install the GitHub self-hosted runner.'
