@@ -28,7 +28,7 @@ jobs:
       - name: Python YAML JSON and CSP checks
         run: python scripts/static_check.py
 
-      - name: Parse PowerShell setup scripts
+      - name: Parse PowerShell setup scripts with pwsh
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -46,4 +46,31 @@ jobs:
               throw "PowerShell syntax failed: $($file.Name)"
             }
             Write-Host "OK PowerShell: $($file.Name)"
+          }
+
+  windows-powershell-parser:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse setup scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem setup -Filter '*.ps1'
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List * | Out-String | Write-Host
+              throw "Windows PowerShell 5.1 syntax failed: $($file.Name)"
+            }
+            Write-Host "OK Windows PowerShell 5.1: $($file.Name)"
           }
