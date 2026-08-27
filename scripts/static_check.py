@@ -28,7 +28,12 @@ def check_python() -> None:
 
 
 def check_yaml() -> None:
-    files = [ROOT / "config" / "models.yaml"] + sorted((ROOT / "shorts").glob("*.yaml"))
+    files = (
+        [ROOT / "config" / "models.yaml"]
+        + sorted((ROOT / "shorts").glob("*.yaml"))
+        + sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        + sorted((ROOT / ".github" / "workflows").glob("*.yaml"))
+    )
     for path in files:
         try:
             yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -92,7 +97,8 @@ def check_short() -> None:
 
 def check_workflow_references() -> None:
     workflow = (ROOT / ".github" / "workflows" / "build-short.yml").read_text(encoding="utf-8")
-    required_scripts = [
+    required_files = [
+        "setup/ensure-comfyui.ps1",
         "scripts/preflight.py",
         "scripts/validate_short.py",
         "scripts/generate_images.py",
@@ -101,12 +107,25 @@ def check_workflow_references() -> None:
         "scripts/sound_design.py",
         "scripts/render.py",
     ]
-    for script in required_scripts:
-        if script not in workflow:
-            fail(f"Build workflow nie wywołuje {script}")
-        if not (ROOT / script).exists():
-            fail(f"Build workflow wskazuje brakujący plik {script}")
+    for item in required_files:
+        if item not in workflow:
+            fail(f"Build workflow nie wywołuje {item}")
+        if not (ROOT / item).exists():
+            fail(f"Build workflow wskazuje brakujący plik {item}")
     print("[OK] Build workflow references")
+
+
+def check_setup_files() -> None:
+    required = [
+        ROOT / "setup" / "windows-bootstrap.ps1",
+        ROOT / "setup" / "install-zimage.ps1",
+        ROOT / "setup" / "install-github-runner.ps1",
+        ROOT / "setup" / "ensure-comfyui.ps1",
+    ]
+    for path in required:
+        if not path.exists() or not path.read_text(encoding="utf-8").strip():
+            fail(f"brak setup file: {path}")
+    print(f"[OK] Setup files present: {len(required)}")
 
 
 def main() -> None:
@@ -115,6 +134,7 @@ def main() -> None:
     check_comfy_workflow()
     check_short()
     check_workflow_references()
+    check_setup_files()
     print("STATIC CHECKS OK")
 
 
