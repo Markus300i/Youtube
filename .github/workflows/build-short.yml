@@ -4,16 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       short_file:
-        description: "Ścieżka do pliku YAML, np. shorts/019-szafa.yaml"
+        description: "Ścieżka do pliku YAML"
         required: true
-        default: "shorts/_template.yaml"
+        default: "shorts/001-drzwi-0.yaml"
       skip_images:
-        description: "Pomiń generowanie obrazów"
+        description: "Pomiń generowanie obrazów (użyj istniejących)"
         required: false
         type: boolean
         default: false
       skip_tts:
-        description: "Pomiń generowanie lektora"
+        description: "Pomiń generowanie lektora (użyj istniejącego voice.wav)"
+        required: false
+        type: boolean
+        default: false
+      skip_preflight:
+        description: "Pomiń pełny preflight (tylko awaryjnie)"
         required: false
         type: boolean
         default: false
@@ -21,38 +26,64 @@ on:
 jobs:
   build:
     runs-on: [self-hosted, windows, x64, csp]
-    timeout-minutes: 90
+    timeout-minutes: 120
+    env:
+      CSP_OUTPUT_DIR: "C:\\CSP\\output"
+      CSP_COMFY_URL: "http://127.0.0.1:8188"
+      CSP_VOICE_REFERENCE: "C:\\CSP\\voice\\narrator_reference.wav"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Python info
+      - name: Resolve persistent Python
         shell: powershell
-        run: python --version
+        run: |
+          $candidate = $env:CSP_PYTHON
+          if (-not $candidate -or -not (Test-Path $candidate)) {
+            $candidate = 'C:\CSP\venv\Scripts\python.exe'
+          }
+          if (-not (Test-Path $candidate)) {
+            throw 'Brak C:\CSP\venv. Uruchom najpierw setup/windows-bootstrap.ps1.'
+          }
+          "PYTHON_BIN=$candidate" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $candidate --version
 
-      - name: Install lightweight dependencies
+      - name: Preflight hardware and local services
+        if: ${{ !inputs.skip_preflight }}
         shell: powershell
-        run: python -m pip install -r requirements.txt
+        run: '& $env:PYTHON_BIN scripts/preflight.py'
 
       - name: Validate short
         shell: powershell
-        run: python scripts/validate_short.py "${{ inputs.short_file }}"
+        run: '& $env:PYTHON_BIN scripts/validate_short.py "${{ inputs.short_file }}"'
 
-      - name: Generate images
+      - name: Generate 8 images
         if: ${{ !inputs.skip_images }}
         shell: powershell
-        run: python scripts/generate_images.py "${{ inputs.short_file }}"
+        run: '& $env:PYTHON_BIN scripts/generate_images.py "${{ inputs.short_file }}"'
 
-      - name: Generate narration
+      - name: Generate Polish narration
         if: ${{ !inputs.skip_tts }}
         shell: powershell
-        run: python scripts/generate_tts.py "${{ inputs.short_file }}"
+        run: '& $env:PYTHON_BIN scripts/generate_tts.py "${{ inputs.short_file }}"'
 
-      - name: Transcribe narration
+      - name: Create word-timed subtitles
         shell: powershell
-        run: python scripts/transcribe.py "${{ inputs.short_file }}"
+        run: '& $env:PYTHON_BIN scripts/transcribe.py "${{ inputs.short_file }}"'
 
-      - name: Render final MP4
+      - name: Render final 1080x1920 MP4
         shell: powershell
-        run: python scripts/render.py "${{ inputs.short_file }}"
+        run: '& $env:PYTHON_BIN scripts/render.py "${{ inputs.short_file }}"'
+
+      - name: Show output
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          Write-Host "CSP output root: $env:CSP_OUTPUT_DIR"
+          if (Test-Path $env:CSP_OUTPUT_DIR) {
+            Get-ChildItem $env:CSP_OUTPUT_DIR -Recurse -Filter final.mp4 |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 3 FullName, Length, LastWriteTime |
+              Format-Table -AutoSize
+          }
