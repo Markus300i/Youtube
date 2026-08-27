@@ -72,6 +72,10 @@ jobs:
         shell: powershell
         run: '& $env:PYTHON_BIN scripts/transcribe.py "${{ inputs.short_file }}"'
 
+      - name: Create ambience and twist impact
+        shell: powershell
+        run: '& $env:PYTHON_BIN scripts/sound_design.py "${{ inputs.short_file }}"'
+
       - name: Render final 1080x1920 MP4
         shell: powershell
         run: '& $env:PYTHON_BIN scripts/render.py "${{ inputs.short_file }}"'
