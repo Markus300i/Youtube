@@ -1,0 +1,37 @@
+comfyui:
+  base_url: "http://127.0.0.1:8188"
+  poll_seconds: 2
+  timeout_seconds: 900
+
+image_models:
+  z-image-turbo:
+    workflow: "workflows/comfyui/z-image-turbo-api.json"
+    prompt_node: "PROMPT_NODE_ID"
+    seed_node: "SEED_NODE_ID"
+    save_node: "SAVE_NODE_ID"
+    width: 768
+    height: 1344
+    steps: 8
+  flux2-klein:
+    workflow: "workflows/comfyui/flux2-klein-api.json"
+    prompt_node: "PROMPT_NODE_ID"
+    seed_node: "SEED_NODE_ID"
+    save_node: "SAVE_NODE_ID"
+    width: 768
+    height: 1344
+    steps: 8
+
+tts:
+  engine: "chatterbox"
+  language: "pl"
+  reference_audio: "assets/voice/narrator_reference.wav"
+
+whisper:
+  model: "small"
+  language: "pl"
+
+render:
+  ffmpeg: "ffmpeg"
+  video_codec: "h264_nvenc"
+  audio_codec: "aac"
+  audio_bitrate: "192k"
