@@ -2,3 +2,4 @@ PyYAML==6.0.2
 requests==2.32.3
 faster-whisper==1.1.1
 Pillow==11.0.0
+chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2
