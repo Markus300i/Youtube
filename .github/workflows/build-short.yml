@@ -1,0 +1,58 @@
+name: Build CSP Short
+
+on:
+  workflow_dispatch:
+    inputs:
+      short_file:
+        description: "Ścieżka do pliku YAML, np. shorts/019-szafa.yaml"
+        required: true
+        default: "shorts/_template.yaml"
+      skip_images:
+        description: "Pomiń generowanie obrazów"
+        required: false
+        type: boolean
+        default: false
+      skip_tts:
+        description: "Pomiń generowanie lektora"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: [self-hosted, windows, x64, csp]
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python info
+        shell: powershell
+        run: python --version
+
+      - name: Install lightweight dependencies
+        shell: powershell
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate short
+        shell: powershell
+        run: python scripts/validate_short.py "${{ inputs.short_file }}"
+
+      - name: Generate images
+        if: ${{ !inputs.skip_images }}
+        shell: powershell
+        run: python scripts/generate_images.py "${{ inputs.short_file }}"
+
+      - name: Generate narration
+        if: ${{ !inputs.skip_tts }}
+        shell: powershell
+        run: python scripts/generate_tts.py "${{ inputs.short_file }}"
+
+      - name: Transcribe narration
+        shell: powershell
+        run: python scripts/transcribe.py "${{ inputs.short_file }}"
+
+      - name: Render final MP4
+        shell: powershell
+        run: python scripts/render.py "${{ inputs.short_file }}"
