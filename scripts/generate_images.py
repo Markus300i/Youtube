@@ -109,6 +109,41 @@ def deterministic_seed(short: dict[str, Any]) -> int:
     return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big") % 2_000_000_000
 
 
+def continuity_prompt(short: dict[str, Any], scene: dict[str, Any]) -> str:
+    continuity = short.get("continuity") or {}
+    if not isinstance(continuity, dict):
+        return ""
+
+    parts: list[str] = []
+    global_text = str(continuity.get("global") or "").strip()
+    if global_text:
+        parts.append(global_text)
+
+    anchors = continuity.get("anchors") or {}
+    refs = scene.get("continuity_refs") or []
+    if isinstance(refs, str):
+        refs = [refs]
+
+    if isinstance(anchors, dict):
+        for ref in refs:
+            key = str(ref)
+            value = anchors.get(key)
+            if value:
+                parts.append(str(value).strip())
+            else:
+                print(f"WARN: scena {scene.get('id')} odwołuje się do nieznanego continuity anchor '{key}'")
+
+    return ". ".join(part for part in parts if part)
+
+
+def scene_seed(short: dict[str, Any], scene_id: int, base_seed: int) -> int:
+    continuity = short.get("continuity") or {}
+    mode = str(continuity.get("seed_mode", "per_scene")).strip().lower()
+    if mode == "shared":
+        return base_seed
+    return base_seed + scene_id
+
+
 def free_comfy_memory(base_url: str) -> None:
     try:
         response = requests.post(
@@ -125,6 +160,11 @@ def free_comfy_memory(base_url: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("short_file")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate and overwrite scene images that already exist.",
+    )
     args = parser.parse_args()
 
     short = load_yaml(args.short_file)
@@ -164,17 +204,21 @@ def main() -> None:
     for scene in short["scenes"]:
         scene_id = int(scene["id"])
         target = output_dir / f"scene-{scene_id:02d}.png"
-        if target.exists():
+        if target.exists() and not args.force:
             print(f"SKIP {target.name}")
             continue
 
         workflow = copy.deepcopy(workflow_template)
+        continuity = continuity_prompt(short, scene)
         final_prompt = ". ".join(
-            part for part in (style, str(scene["prompt"]).strip()) if part
+            part
+            for part in (style, continuity, str(scene["prompt"]).strip())
+            if part
         )
 
+        seed = scene_seed(short, scene_id, base_seed)
         apply_binding(workflow, bindings.get("prompt"), final_prompt)
-        apply_binding(workflow, bindings.get("seed"), base_seed + scene_id)
+        apply_binding(workflow, bindings.get("seed"), seed)
         apply_binding(workflow, bindings.get("steps"), steps)
         apply_binding(workflow, bindings.get("width"), width)
         apply_binding(workflow, bindings.get("height"), height)
@@ -189,7 +233,7 @@ def main() -> None:
 
         print(
             f"GENERATE scene {scene_id}/8 via {short['image_model']} "
-            f"({width}x{height}, {steps} steps, seed={base_seed + scene_id})"
+            f"({width}x{height}, {steps} steps, seed={seed})"
         )
         prompt_id = submit_prompt(base_url, workflow)
         history = wait_history(
