@@ -55,6 +55,31 @@ def find_recursive(value: Any, needle: str) -> bool:
     return False
 
 
+def validate_workflow_bindings(
+    check: Preflight,
+    workflow_path: Path,
+    bindings: dict[str, Any],
+    label: str,
+) -> None:
+    try:
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        for binding_name, binding in bindings.items():
+            node_id = str(binding["node"])
+            input_name = str(binding["input"])
+            if node_id not in workflow:
+                check.fail(
+                    f"{label}: binding {binding_name} wskazuje brak node {node_id}"
+                )
+            elif input_name not in workflow[node_id].get("inputs", {}):
+                check.fail(
+                    f"{label}: binding {binding_name} wskazuje brak input "
+                    f"{node_id}.{input_name}"
+                )
+        check.ok(f"Workflow JSON odczytany: {workflow_path.name}")
+    except Exception as exc:
+        check.fail(f"{label} workflow ComfyUI jest nieprawidłowy: {exc}")
+
+
 def main() -> int:
     check = Preflight()
     cfg = load_yaml("config/models.yaml")
@@ -99,7 +124,7 @@ def main() -> int:
         check.fail(f"Nie można zaimportować/uruchomić PyTorch CUDA: {exc}")
 
     # Required Python modules
-    for module in ("yaml", "requests", "faster_whisper"):
+    for module in ("yaml", "requests", "faster_whisper", "PIL"):
         try:
             __import__(module)
             check.ok(f"Python module: {module}")
@@ -187,6 +212,17 @@ def main() -> int:
         "VAEDecode",
         "SaveImage",
     }
+    if image_cfg.get("control_workflow"):
+        required_classes.update(
+            {
+                "ModelPatchLoader",
+                "QwenImageDiffsynthControlnet",
+                "LoadImage",
+                "ImageScaleToTotalPixels",
+                "Canny",
+                "GetImageSize",
+            }
+        )
 
     try:
         response = requests.get(f"{comfy_url}/object_info", timeout=30)
@@ -200,30 +236,34 @@ def main() -> int:
 
         models = image_cfg.get("models") or {}
         for kind, filename in models.items():
+            if not filename:
+                continue
             if find_recursive(object_info, str(filename)):
                 check.ok(f"ComfyUI widzi model {kind}: {filename}")
             else:
                 check.fail(
-                    f"ComfyUI nie widzi modelu {kind}: {filename}. Uruchom setup/install-zimage.ps1 i zrestartuj ComfyUI."
+                    f"ComfyUI nie widzi modelu {kind}: {filename}. "
+                    "Uruchom setup/install-zimage.ps1 i zrestartuj ComfyUI."
                 )
     except Exception as exc:
         check.fail(f"Nie udało się odczytać /object_info ComfyUI: {exc}")
 
     workflow_path = ROOT / image_cfg["workflow"]
-    try:
-        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        for binding_name, binding in (image_cfg.get("bindings") or {}).items():
-            node_id = str(binding["node"])
-            input_name = str(binding["input"])
-            if node_id not in workflow:
-                check.fail(f"Workflow: binding {binding_name} wskazuje brak node {node_id}")
-            elif input_name not in workflow[node_id].get("inputs", {}):
-                check.fail(
-                    f"Workflow: binding {binding_name} wskazuje brak input {node_id}.{input_name}"
-                )
-        check.ok(f"Workflow JSON odczytany: {workflow_path.name}")
-    except Exception as exc:
-        check.fail(f"Workflow ComfyUI jest nieprawidłowy: {exc}")
+    validate_workflow_bindings(
+        check,
+        workflow_path,
+        image_cfg.get("bindings") or {},
+        "Z-Image T2I",
+    )
+
+    control_workflow = image_cfg.get("control_workflow")
+    if control_workflow:
+        validate_workflow_bindings(
+            check,
+            ROOT / str(control_workflow),
+            image_cfg.get("control_bindings") or {},
+            "Z-Image ControlNet",
+        )
 
     return finish(check)
 
