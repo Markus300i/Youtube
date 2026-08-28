@@ -42,43 +42,89 @@ def check_yaml() -> None:
     print(f"[OK] YAML: {len(files)} files")
 
 
-def check_comfy_workflow() -> None:
-    config = load_yaml("config/models.yaml")
-    model = config["image_models"]["z-image-turbo"]
-    path = ROOT / model["workflow"]
-    try:
-        graph = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        fail(f"ComfyUI JSON: {exc}")
-
-    required_classes = {
-        "UNETLoader",
-        "CLIPLoader",
-        "VAELoader",
-        "CLIPTextEncode",
-        "ConditioningZeroOut",
-        "EmptySD3LatentImage",
-        "ModelSamplingAuraFlow",
-        "KSampler",
-        "VAEDecode",
-        "SaveImage",
-    }
+def validate_graph(
+    graph: dict,
+    bindings: dict,
+    required_classes: set[str],
+    label: str,
+) -> None:
     classes = {str(node.get("class_type")) for node in graph.values()}
     missing = required_classes - classes
     if missing:
-        fail("ComfyUI graph missing classes: " + ", ".join(sorted(missing)))
+        fail(f"{label} missing classes: " + ", ".join(sorted(missing)))
 
-    for name, binding in (model.get("bindings") or {}).items():
+    for name, binding in bindings.items():
         node = str(binding["node"])
         input_name = str(binding["input"])
         if node not in graph:
-            fail(f"binding {name}: missing node {node}")
+            fail(f"{label} binding {name}: missing node {node}")
         if input_name not in graph[node].get("inputs", {}):
-            fail(f"binding {name}: missing input {node}.{input_name}")
+            fail(f"{label} binding {name}: missing input {node}.{input_name}")
 
-    if graph["3"]["inputs"].get("steps") != 8:
+
+def check_comfy_workflow() -> None:
+    config = load_yaml("config/models.yaml")
+    model = config["image_models"]["z-image-turbo"]
+
+    t2i_path = ROOT / model["workflow"]
+    try:
+        t2i = json.loads(t2i_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        fail(f"ComfyUI T2I JSON: {exc}")
+
+    validate_graph(
+        t2i,
+        model.get("bindings") or {},
+        {
+            "UNETLoader",
+            "CLIPLoader",
+            "VAELoader",
+            "CLIPTextEncode",
+            "ConditioningZeroOut",
+            "EmptySD3LatentImage",
+            "ModelSamplingAuraFlow",
+            "KSampler",
+            "VAEDecode",
+            "SaveImage",
+        },
+        "Z-Image T2I",
+    )
+    if t2i["3"]["inputs"].get("steps") != 8:
         fail("Z-Image smoke workflow powinien domyślnie używać 8 kroków")
-    print("[OK] ComfyUI Z-Image graph + bindings")
+
+    control_path = ROOT / str(model.get("control_workflow"))
+    try:
+        control = json.loads(control_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        fail(f"ComfyUI ControlNet JSON: {exc}")
+
+    validate_graph(
+        control,
+        model.get("control_bindings") or {},
+        {
+            "UNETLoader",
+            "CLIPLoader",
+            "VAELoader",
+            "ModelPatchLoader",
+            "LoadImage",
+            "ImageScaleToTotalPixels",
+            "Canny",
+            "GetImageSize",
+            "QwenImageDiffsynthControlnet",
+            "CLIPTextEncode",
+            "ConditioningZeroOut",
+            "EmptySD3LatentImage",
+            "ModelSamplingAuraFlow",
+            "KSampler",
+            "VAEDecode",
+            "SaveImage",
+        },
+        "Z-Image ControlNet",
+    )
+    if control["7"]["inputs"].get("steps") != 9:
+        fail("Z-Image ControlNet workflow powinien domyślnie używać 9 kroków")
+
+    print("[OK] ComfyUI Z-Image T2I + ControlNet graphs + bindings")
 
 
 def check_short() -> None:
