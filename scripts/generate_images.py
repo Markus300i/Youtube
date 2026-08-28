@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from PIL import Image
 
 from common import ROOT, load_yaml, short_output_dir
 
@@ -90,6 +91,23 @@ def download_first_image(
     target.write_bytes(response.content)
 
 
+def upload_input_image(base_url: str, path: Path, remote_name: str) -> str:
+    with path.open("rb") as handle:
+        response = requests.post(
+            f"{base_url}/upload/image",
+            files={"image": (remote_name, handle, "image/png")},
+            data={"type": "input", "overwrite": "true"},
+            timeout=120,
+        )
+    response.raise_for_status()
+    payload = response.json()
+    name = str(payload.get("name") or remote_name)
+    subfolder = str(payload.get("subfolder") or "").strip("/\\")
+    if subfolder:
+        return f"{subfolder}/{name}"
+    return name
+
+
 def apply_binding(
     workflow: dict[str, Any], binding: dict[str, str] | None, value: Any
 ) -> None:
@@ -131,7 +149,10 @@ def continuity_prompt(short: dict[str, Any], scene: dict[str, Any]) -> str:
             if value:
                 parts.append(str(value).strip())
             else:
-                print(f"WARN: scena {scene.get('id')} odwołuje się do nieznanego continuity anchor '{key}'")
+                print(
+                    f"WARN: scena {scene.get('id')} odwołuje się do "
+                    f"nieznanego continuity anchor '{key}'"
+                )
 
     return ". ".join(part for part in parts if part)
 
@@ -142,6 +163,40 @@ def scene_seed(short: dict[str, Any], scene_id: int, base_seed: int) -> int:
     if mode == "shared":
         return base_seed
     return base_seed + scene_id
+
+
+def normalized_crop_box(
+    crop: Any, width: int, height: int
+) -> tuple[int, int, int, int]:
+    if not isinstance(crop, (list, tuple)) or len(crop) != 4:
+        return (0, 0, width, height)
+    values = [float(item) for item in crop]
+    left = max(0.0, min(0.98, values[0]))
+    top = max(0.0, min(0.98, values[1]))
+    right = max(left + 0.01, min(1.0, values[2]))
+    bottom = max(top + 0.01, min(1.0, values[3]))
+    return (
+        int(round(left * width)),
+        int(round(top * height)),
+        int(round(right * width)),
+        int(round(bottom * height)),
+    )
+
+
+def prepare_control_image(
+    reference: Path,
+    target: Path,
+    crop: Any,
+    width: int,
+    height: int,
+) -> None:
+    with Image.open(reference) as source:
+        image = source.convert("RGB")
+        box = normalized_crop_box(crop, image.width, image.height)
+        image = image.crop(box)
+        image = image.resize((width, height), Image.Resampling.LANCZOS)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        image.save(target, format="PNG", optimize=True)
 
 
 def free_comfy_memory(base_url: str) -> None:
@@ -155,6 +210,24 @@ def free_comfy_memory(base_url: str) -> None:
         print("COMFY: requested model unload / VRAM release")
     except Exception as exc:  # image files are already safe; don't hide that fact
         print(f"WARN: nie udało się zwolnić pamięci ComfyUI: {exc}")
+
+
+def render_workflow(
+    *,
+    base_url: str,
+    comfy: dict[str, Any],
+    workflow: dict[str, Any],
+    save_node: str,
+    target: Path,
+) -> None:
+    prompt_id = submit_prompt(base_url, workflow)
+    history = wait_history(
+        base_url,
+        prompt_id,
+        timeout=int(comfy.get("timeout_seconds", 1200)),
+        poll=int(comfy.get("poll_seconds", 2)),
+    )
+    download_first_image(base_url, history, save_node, target)
 
 
 def main() -> None:
@@ -186,8 +259,20 @@ def main() -> None:
         )
 
     workflow_template = json.loads(workflow_path.read_text(encoding="utf-8"))
+
+    control_template: dict[str, Any] | None = None
+    control_bindings = model_cfg.get("control_bindings") or {}
+    control_workflow_raw = model_cfg.get("control_workflow")
+    if control_workflow_raw:
+        control_path = ROOT / str(control_workflow_raw)
+        if not control_path.exists():
+            raise FileNotFoundError(f"Brak ControlNet workflow: {control_path}")
+        control_template = json.loads(control_path.read_text(encoding="utf-8"))
+
     output_dir = short_output_dir(short) / "images"
     output_dir.mkdir(parents=True, exist_ok=True)
+    control_dir = short_output_dir(short) / "control"
+    control_dir.mkdir(parents=True, exist_ok=True)
 
     wait_for_comfy(base_url)
 
@@ -197,7 +282,9 @@ def main() -> None:
     width = int(model_cfg.get("width", 768))
     height = int(model_cfg.get("height", 1344))
     steps = int(model_cfg.get("steps", 8))
+    control_steps = int(model_cfg.get("control_steps", max(steps, 9)))
     models = model_cfg.get("models") or {}
+    megapixels = (width * height) / 1_000_000
 
     save_node = str(bindings["save_prefix"]["node"])
 
@@ -208,41 +295,137 @@ def main() -> None:
             print(f"SKIP {target.name}")
             continue
 
-        workflow = copy.deepcopy(workflow_template)
         continuity = continuity_prompt(short, scene)
         final_prompt = ". ".join(
             part
             for part in (style, continuity, str(scene["prompt"]).strip())
             if part
         )
-
         seed = scene_seed(short, scene_id, base_seed)
-        apply_binding(workflow, bindings.get("prompt"), final_prompt)
-        apply_binding(workflow, bindings.get("seed"), seed)
-        apply_binding(workflow, bindings.get("steps"), steps)
-        apply_binding(workflow, bindings.get("width"), width)
-        apply_binding(workflow, bindings.get("height"), height)
-        apply_binding(workflow, bindings.get("unet"), models.get("unet"))
-        apply_binding(workflow, bindings.get("clip"), models.get("clip"))
-        apply_binding(workflow, bindings.get("vae"), models.get("vae"))
-        apply_binding(
-            workflow,
-            bindings.get("save_prefix"),
-            f"csp_{short['id']}_scene_{scene_id:02d}",
-        )
+        control = scene.get("control") or {}
 
-        print(
-            f"GENERATE scene {scene_id}/8 via {short['image_model']} "
-            f"({width}x{height}, {steps} steps, seed={seed})"
-        )
-        prompt_id = submit_prompt(base_url, workflow)
-        history = wait_history(
-            base_url,
-            prompt_id,
-            timeout=int(comfy.get("timeout_seconds", 1200)),
-            poll=int(comfy.get("poll_seconds", 2)),
-        )
-        download_first_image(base_url, history, save_node, target)
+        if control:
+            if control_template is None:
+                raise RuntimeError(
+                    f"Scena {scene_id} wymaga ControlNet, ale model nie ma control_workflow"
+                )
+            required_control = {
+                "prompt",
+                "seed",
+                "steps",
+                "unet",
+                "clip",
+                "vae",
+                "patch",
+                "reference_image",
+                "strength",
+                "canny_low",
+                "canny_high",
+                "megapixels",
+                "save_prefix",
+            }
+            missing_control = sorted(required_control - set(control_bindings))
+            if missing_control:
+                raise RuntimeError(
+                    "Brak control bindings: " + ", ".join(missing_control)
+                )
+
+            ref_scene = int(control.get("reference_scene", 0))
+            if ref_scene < 1 or ref_scene >= scene_id:
+                raise ValueError(
+                    f"Scena {scene_id}: reference_scene musi wskazywać wcześniejszą scenę"
+                )
+            reference = output_dir / f"scene-{ref_scene:02d}.png"
+            if not reference.exists():
+                raise FileNotFoundError(
+                    f"Scena {scene_id}: brak obrazu referencyjnego {reference}"
+                )
+
+            control_image = control_dir / f"scene-{scene_id:02d}-from-{ref_scene:02d}.png"
+            prepare_control_image(
+                reference,
+                control_image,
+                control.get("crop"),
+                width,
+                height,
+            )
+            remote_name = f"csp_{short['id']}_control_{scene_id:02d}.png"
+            uploaded = upload_input_image(base_url, control_image, remote_name)
+
+            workflow = copy.deepcopy(control_template)
+            apply_binding(workflow, control_bindings.get("prompt"), final_prompt)
+            apply_binding(workflow, control_bindings.get("seed"), seed)
+            apply_binding(workflow, control_bindings.get("steps"), control_steps)
+            apply_binding(workflow, control_bindings.get("unet"), models.get("unet"))
+            apply_binding(workflow, control_bindings.get("clip"), models.get("clip"))
+            apply_binding(workflow, control_bindings.get("vae"), models.get("vae"))
+            apply_binding(workflow, control_bindings.get("patch"), models.get("patch"))
+            apply_binding(workflow, control_bindings.get("reference_image"), uploaded)
+            apply_binding(
+                workflow,
+                control_bindings.get("strength"),
+                float(control.get("strength", 0.9)),
+            )
+            apply_binding(
+                workflow,
+                control_bindings.get("canny_low"),
+                float(control.get("canny_low", 0.1)),
+            )
+            apply_binding(
+                workflow,
+                control_bindings.get("canny_high"),
+                float(control.get("canny_high", 0.32)),
+            )
+            apply_binding(
+                workflow,
+                control_bindings.get("megapixels"),
+                megapixels,
+            )
+            apply_binding(
+                workflow,
+                control_bindings.get("save_prefix"),
+                f"csp_{short['id']}_scene_{scene_id:02d}_control",
+            )
+            control_save_node = str(control_bindings["save_prefix"]["node"])
+            print(
+                f"GENERATE scene {scene_id}/8 via Z-Image ControlNet "
+                f"ref={ref_scene}, strength={float(control.get('strength', 0.9)):.2f}, "
+                f"seed={seed}"
+            )
+            render_workflow(
+                base_url=base_url,
+                comfy=comfy,
+                workflow=workflow,
+                save_node=control_save_node,
+                target=target,
+            )
+        else:
+            workflow = copy.deepcopy(workflow_template)
+            apply_binding(workflow, bindings.get("prompt"), final_prompt)
+            apply_binding(workflow, bindings.get("seed"), seed)
+            apply_binding(workflow, bindings.get("steps"), steps)
+            apply_binding(workflow, bindings.get("width"), width)
+            apply_binding(workflow, bindings.get("height"), height)
+            apply_binding(workflow, bindings.get("unet"), models.get("unet"))
+            apply_binding(workflow, bindings.get("clip"), models.get("clip"))
+            apply_binding(workflow, bindings.get("vae"), models.get("vae"))
+            apply_binding(
+                workflow,
+                bindings.get("save_prefix"),
+                f"csp_{short['id']}_scene_{scene_id:02d}",
+            )
+            print(
+                f"GENERATE scene {scene_id}/8 via {short['image_model']} "
+                f"({width}x{height}, {steps} steps, seed={seed})"
+            )
+            render_workflow(
+                base_url=base_url,
+                comfy=comfy,
+                workflow=workflow,
+                save_node=save_node,
+                target=target,
+            )
+
         print(f"SAVED {target}")
 
     if comfy.get("free_after_images", True):
