@@ -13,7 +13,7 @@ $ProgressPreference = "SilentlyContinue"
 
 function Assert-Exists([string]$Path, [string]$Label) {
     if (-not (Test-Path $Path)) {
-        throw "$Label not found: $Path"
+        throw "${Label} not found: $Path"
     }
 }
 
@@ -28,7 +28,7 @@ function Download-Model(
     }
 
     if (-not $InstallModels) {
-        throw "Missing $Label: $Target`nRun this script again with -InstallModels."
+        throw "Missing ${Label}: $Target`nRun this script again with -InstallModels."
     }
 
     $dir = Split-Path -Parent $Target
@@ -154,7 +154,7 @@ finally {
 }
 
 $result = "C:\CSP\output\001-drzwi-0\compare\scene-03\sdxl-ipadapter-controlnet.png"
-Write-Host "" 
+Write-Host ""
 Write-Host "READY" -ForegroundColor Green
 Write-Host $result
 if (Test-Path $result) {
