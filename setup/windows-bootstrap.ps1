@@ -19,7 +19,7 @@ $basePython = $null
 
 if (Get-Command py -ErrorAction SilentlyContinue) {
     try {
-        $candidate = & py -3.11 -c 'import sys; print(sys.executable)'
+        $candidate = & py -3.11 -c "import sys; print(sys.executable)"
         if ($LASTEXITCODE -eq 0 -and $candidate) {
             $basePython = ($candidate | Select-Object -First 1).Trim()
         }
@@ -31,9 +31,9 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
 
 if (-not $basePython -and (Get-Command python -ErrorAction SilentlyContinue)) {
     try {
-        $version = & python -c 'import sys; print(str(sys.version_info.major) + "." + str(sys.version_info.minor))'
+        $version = & python -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))"
         if ($LASTEXITCODE -eq 0 -and ($version | Select-Object -First 1).Trim() -eq '3.11') {
-            $candidate = & python -c 'import sys; print(sys.executable)'
+            $candidate = & python -c "import sys; print(sys.executable)"
             if ($LASTEXITCODE -eq 0 -and $candidate) {
                 $basePython = ($candidate | Select-Object -First 1).Trim()
             }
@@ -81,14 +81,28 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'Checking CUDA for TTS...'
-& $venvPython -c 'import torch; print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())'
-if ($LASTEXITCODE -ne 0) {
-    throw 'PyTorch CUDA check could not run.'
+$cudaCheckPath = Join-Path $CspRoot 'check-cuda.py'
+$cudaCheckLines = @(
+    'import torch',
+    'print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())',
+    'raise SystemExit(0 if torch.cuda.is_available() else 1)'
+)
+Set-Content -Path $cudaCheckPath -Value $cudaCheckLines -Encoding ASCII
+
+$cudaExitCode = 1
+try {
+    & $venvPython $cudaCheckPath
+    $cudaExitCode = $LASTEXITCODE
+}
+finally {
+    Remove-Item $cudaCheckPath -Force -ErrorAction SilentlyContinue
 }
 
-& $venvPython -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)'
-if ($LASTEXITCODE -ne 0) {
-    throw 'CUDA is not available in the CSP environment.'
+if ($cudaExitCode -ne 0) {
+    Write-Host ''
+    Write-Host 'CUDA diagnostic:'
+    & $venvPython -m pip show torch
+    throw 'CUDA is not available or PyTorch could not load in the CSP environment.'
 }
 
 [Environment]::SetEnvironmentVariable('CSP_PYTHON', $venvPython, 'User')
