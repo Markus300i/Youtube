@@ -1,0 +1,281 @@
+id: "001"
+title: "Drzwi 0"
+series: "Nie Otwieraj"
+status: "ready"
+fictional: true
+archive17: false
+image_model: "z-image-turbo"
+seed: 1700317
+visual_style: >-
+  fictional cinematic photorealistic Polish dark mystery, serious documentary thriller,
+  basement of an aging Polish apartment block, authentic post-communist architecture,
+  cold fluorescent practical lighting, damp concrete, muted charcoal grey and aged beige,
+  restrained psychological horror, realistic textures, subtle film grain, no gore,
+  no supernatural creature visible, no text, no subtitles, no watermark, vertical composition
+continuity:
+  seed_mode: "per_scene"
+  global: >-
+    Maintain strict visual continuity between all scenes. Reuse the exact same architecture,
+    material palette, object proportions and recurring character appearance whenever referenced.
+    Do not redesign recurring doors, handles, frames, pipes, scratches or wall layout between scenes.
+  anchors:
+    basement: >-
+      The exact same narrow basement corridor: low concrete ceiling about 2.1 meters high,
+      rough aged beige-grey concrete walls, one mustard-yellow gas pipe running vertically on the left side,
+      galvanized utility pipes along the ceiling, one cold fluorescent tube light, dusty bare concrete floor,
+      same wall stains and same pipe positions in every basement scene.
+    basement_door: >-
+      The exact same mysterious basement door in every appearance: narrow dark walnut-brown wooden door,
+      three long vertical recessed panels, matte black steel frame, black metal lever handle on the viewer-facing right side,
+      door hinges on the viewer-facing left side, simple keyhole below the handle,
+      small rectangular brushed-aluminum plate centered high on the door,
+      chipped varnish at the lower-left corner and one thin diagonal scratch near the handle.
+      Never mirror the door. Preserve panel count, wood tone, handle side, hinge side,
+      frame thickness, plate size and damage marks exactly.
+    apartment_door: >-
+      The exact same tenant apartment entrance door in every appearance: medium brown laminate door,
+      six shallow horizontal grooves, dark brown frame, brushed-steel lever handle on the right,
+      circular peephole centered high, narrow vertical scuff near the lower-right edge.
+      Preserve groove count, handle side, peephole position, frame color and scuff exactly.
+    administrator: >-
+      The same Polish apartment-block administrator in every appearance:
+      man about 65 years old, short thinning grey hair, rectangular reading glasses,
+      average build with slightly stooped posture, weathered natural face,
+      dark navy work jacket over a charcoal knitted sweater, dark trousers,
+      ordinary black shoes. Restrained serious expression, tired and mildly concerned.
+      He must look like a real long-time building administrator, not a businessman,
+      police officer, security guard or cinematic hero.
+    tenant: >-
+      The same tenant: Polish man about 32 years old, short dark brown hair,
+      average build, plain black jacket, clean-shaven, tense restrained expression.
+    stairwell: >-
+      The same ground-floor stairwell of the building: worn beige terrazzo steps,
+      pale dirty cream walls, dark brown wooden handrail, old frosted glass window,
+      cold practical lighting, authentic 1980s Polish apartment-block interior.
+
+narration: >-
+  W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
+  Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
+  Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
+  Wieczorem jeden z lokatorów usłyszał zza drzwi trzy spokojne puknięcia.
+  Nie otworzył. Następnego ranka tabliczka z zerem leżała na podłodze, a na drzwiach ktoś wydrapał numer jego mieszkania.
+  Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
+  Na jego końcu stały identyczne drzwi jak te do mieszkania lokatora.
+  Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
+
+scenes:
+  - id: 1
+    text: >-
+      W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
+    continuity_refs: ["basement", "basement_door"]
+    prompt: >-
+      MASTER SET, high-end photorealistic documentary evidence photograph, vertical 9:16.
+      A narrow neglected basement corridor inside an ordinary aging Polish apartment block from the late communist era.
+      Camera centered at human eye level, straight-on perspective, approximately 35mm full-frame lens,
+      enough floor visible in the foreground to create natural depth. No people and no furniture.
+
+      At the far end stands ONE narrow dark walnut-brown wooden door in a matte black steel frame.
+      The door has EXACTLY THREE long vertical recessed wooden panels, no extra decorative panels and no horizontal grooves.
+      IMPORTANT ORIENTATION: viewed from the camera, the black lever HANDLE AND KEYHOLE ARE ON THE RIGHT SIDE OF THE DOOR.
+      The HINGES ARE ON THE LEFT SIDE OF THE DOOR. Never mirror or reverse this arrangement.
+      A small plain rectangular brushed-aluminum plate is mounted high and centered on the door,
+      with no readable lettering. Chipped varnish is visible near the lower-left edge of the door,
+      plus one subtle diagonal scratch close to the right-side handle.
+
+      On the LEFT side of the corridor is ONE old mustard-yellow gas pipe: it rises vertically from the floor near the left wall,
+      turns through a visible elbow close to the ceiling, then continues horizontally above the door toward the right.
+      Keep this yellow pipe simple and physically plausible, with aged metal clamps and worn paint.
+      A few dull galvanized utility pipes may run along the ceiling, but they must not overwhelm the scene.
+
+      One old cold-white fluorescent tube fixture is mounted to the low concrete ceiling above the door.
+      Illumination is harsh, slightly uneven and mundane, producing realistic dirty shadows rather than cinematic beauty light.
+      The concrete walls are rough, damp, stained and imperfect, with discoloration, old repairs and decades of wear.
+      The bare concrete floor is dusty and irregular with small dark damp marks.
+
+      The image must feel like a real photograph taken in an unpleasant Polish basement,
+      not architectural visualization, not CGI, not a polished horror set.
+      Natural wood grain, real concrete microtexture, subtle lens imperfections, restrained film grain,
+      low-key psychological unease only. No fog, no supernatural glow, no monster, no dramatic colored lighting,
+      no extra doors, no duplicated pipes, no readable text, no logo, no watermark.
+    motion: "push_in"
+
+  - id: 2
+    text: >-
+      Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
+    continuity_refs: ["basement", "basement_door"]
+    render:
+      mode: "crop"
+      reference_scene: 1
+      crop: [0.14, 0.16, 0.86, 0.96]
+    prompt: >-
+      Exact closer photographic view of the master basement door. No generative redesign:
+      preserve the identical door, handle, plate, pipe bends, wall stains and fluorescent fixture.
+    motion: "slow_push"
+
+  - id: 3
+    text: >-
+      Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
+    continuity_refs:
+      - "basement"
+      - "basement_door"
+      - "administrator"
+    render:
+      mode: "flux_edit"
+      reference_scene: 1
+      edit_rects:
+        - [0.64, 0.32, 0.99, 0.96]
+      feather: 0.014
+      instruction: >-
+        Edit only the designated right-side area of the supplied master photograph.
+        Preserve the original photograph exactly everywhere else.
+
+        Add one realistic Polish apartment-block administrator, about 65 years old,
+        standing naturally in the right foreground close to the concrete wall.
+        He has short thinning grey hair, rectangular reading glasses, a slightly
+        stooped average build, a weathered natural face, dark navy work jacket
+        over a charcoal knitted sweater, dark trousers and ordinary black shoes.
+
+        He is not posing for the camera. His head is slightly lowered and his
+        attention is focused on old technical building documents held naturally
+        in both hands. He holds a worn administrative folder or thick binder with
+        several aged off-white sheets and a folded technical floor plan.
+        No readable writing, labels, numbers or typography.
+
+        His expression is restrained and believable: concentrated, mildly confused
+        and increasingly concerned because the plans do not match what he sees.
+
+        Do NOT add a table, desk, chair, cabinet, trolley or any other furniture.
+        Do NOT add new pipes, electrical boxes, tools, doors, lamps or basement clutter.
+
+        The mysterious wooden door must remain clearly visible as the dominant
+        background subject. Do not redesign its wood grain, three recessed vertical
+        panels, black steel frame, black handle, metal plate or existing damage.
+
+        Preserve the yellow gas pipe, ceiling pipes, fluorescent fixture, concrete
+        walls, stains, floor texture, perspective and camera position of the master image.
+
+        Lighting on the administrator must come only from the same cold overhead
+        fluorescent fixture already present in the photograph. No cinematic rim light,
+        no warm portrait lighting, no studio lighting.
+
+        Photorealistic Polish documentary-thriller frame, natural skin texture,
+        physically plausible hands and fingers, realistic clothing folds,
+        realistic contact shadows, subtle imperfect fluorescent lighting,
+        no glamour, no stylization, no supernatural visual effects.
+    prompt: >-
+      A real Polish building administrator quietly checks old technical plans beside
+      the mysterious basement door, realizing that according to the documents there
+      should only be a sealed technical shaft behind that wall. Restrained documentary
+      realism, mundane Polish apartment-block basement, subtle psychological unease.
+    motion: "pan_right"
+
+  - id: 4
+    text: >-
+      Wieczorem jeden z lokatorów usłyszał zza drzwi trzy spokojne puknięcia.
+    continuity_refs: ["basement", "basement_door", "tenant"]
+    render:
+      mode: "flux_edit"
+      reference_scene: 1
+      edit_rects:
+        - [0.03, 0.30, 0.49, 0.96]
+      feather: 0.025
+      instruction: >-
+        Edit the supplied photograph while keeping all architecture outside the subject area identical.
+        Add the same 32-year-old Polish tenant in the left foreground, several steps from the closed door,
+        partly in profile and listening tensely. Make the light feel slightly later in the evening without
+        redesigning the door, frame, pipes, lamp, walls or floor. No monster.
+    prompt: >-
+      Tenant listens to three knocks in the unchanged basement.
+    motion: "push_in"
+
+  - id: 5
+    text: >-
+      Nie otworzył. Następnego ranka tabliczka z zerem leżała na podłodze, a na drzwiach ktoś wydrapał numer jego mieszkania.
+    continuity_refs: ["basement", "basement_door"]
+    render:
+      mode: "flux_edit"
+      reference_scene: 1
+      crop: [0.14, 0.22, 0.86, 1.00]
+      edit_rects:
+        - [0.30, 0.16, 0.70, 0.47]
+        - [0.18, 0.63, 0.84, 0.98]
+      feather: 0.018
+      instruction: >-
+        Keep this close view of the exact same door unchanged except for two evidence details.
+        Remove the brushed-aluminum plate from its original mounting position and place that exact plate
+        on the dusty concrete floor near the threshold. Add fresh shallow scratches in the wood near the handle.
+        Do not alter the door panels, handle, frame, surviving wall texture or visible pipe geometry.
+        No readable number or typography.
+    prompt: >-
+      Evidence close-up: fallen plate and new scratches on the same door.
+    motion: "static"
+
+  - id: 6
+    text: >-
+      Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
+    continuity_refs: ["basement", "basement_door", "administrator"]
+    render:
+      mode: "flux_edit"
+      reference_scene: 1
+      edit_rects:
+        - [0.25, 0.27, 0.76, 0.89]
+      feather: 0.022
+      instruction: >-
+        Preserve the supplied basement photograph exactly outside the door opening. Open the same wooden door inward,
+        keeping its walnut material and three-panel design visible on the door leaf. Behind the unchanged black frame,
+        reveal an impossibly narrow unfinished concrete corridor with one bare warm tungsten bulb.
+        Add partial silhouettes of the locksmith and administrator at the threshold only if they fit inside the edit area.
+        Do not move or redesign the yellow gas pipe, fluorescent lamp, surrounding concrete, frame or floor outside the mask.
+        No creature.
+    prompt: >-
+      The same basement door opens onto an impossible narrow corridor.
+    motion: "push_in"
+
+  - id: 7
+    text: >-
+      Na jego końcu stały identyczne drzwi jak te do mieszkania lokatora.
+    continuity_refs: ["apartment_door"]
+    prompt: >-
+      MASTER APARTMENT DOOR. Telephoto view down the newly revealed narrow concrete corridor.
+      The tenant apartment entrance door is centered and large enough to occupy roughly forty percent of frame width
+      and fifty percent of frame height: medium brown laminate, exactly six shallow horizontal grooves,
+      circular peephole, brushed-steel lever handle on the right, narrow lower-right scuff.
+      One weak bare bulb, no people, oppressive symmetry, realistic documentary depth.
+    motion: "slow_push"
+
+  - id: 8
+    text: >-
+      Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
+    continuity_refs: ["apartment_door", "administrator", "tenant", "stairwell"]
+    render:
+      mode: "flux_edit"
+      reference_scene: 7
+      preserve_rects:
+        - [0.29, 0.25, 0.45, 0.86]
+        - [0.55, 0.25, 0.71, 0.86]
+        - [0.45, 0.25, 0.55, 0.38]
+        - [0.45, 0.47, 0.55, 0.86]
+      feather: 0.018
+      instruction: >-
+        Transform the environment around the central apartment door into the ground-floor stairwell of an aging
+        1980s Polish apartment block: worn beige terrazzo, dirty cream walls, dark wooden handrail and old frosted glass.
+        Keep the central apartment door in exactly the same position and identity. Add the administrator and tenant
+        standing tensely to either side of it. Add a small brushed-aluminum plate near the upper center of the door
+        in the generated edit; avoid readable typography. Photorealistic final documentary horror frame, no monster.
+    prompt: >-
+      The same apartment door is now on the ground floor, marked by a metal plate.
+    motion: "slow_push"
+
+subtitles:
+  max_words: 5
+  uppercase: true
+
+sound:
+  ambience: "basement_roomtone"
+  impact_before_end: true
+  silence_before_twist_ms: 700
+
+output:
+  width: 1080
+  height: 1920
+  fps: 30

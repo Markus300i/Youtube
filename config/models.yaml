@@ -1,0 +1,116 @@
+comfyui:
+  base_url: "http://127.0.0.1:8188"
+  poll_seconds: 2
+  timeout_seconds: 1200
+  free_after_images: true
+
+image_models:
+  z-image-turbo:
+    workflow: "workflows/comfyui/z-image-turbo-api.json"
+    control_workflow: "workflows/comfyui/z-image-turbo-controlnet-api.json"
+    width: 768
+    height: 1344
+    steps: 8
+    control_steps: 9
+    models:
+      unet: "z_image_turbo_int8_convrot.safetensors"
+      clip: "qwen_3_4b_fp4_mixed.safetensors"
+      vae: "ae.safetensors"
+      patch: "Z-Image-Turbo-Fun-Controlnet-Union.safetensors"
+    bindings:
+      prompt: {node: "27", input: "text"}
+      seed: {node: "3", input: "seed"}
+      steps: {node: "3", input: "steps"}
+      width: {node: "13", input: "width"}
+      height: {node: "13", input: "height"}
+      unet: {node: "28", input: "unet_name"}
+      clip: {node: "30", input: "clip_name"}
+      vae: {node: "29", input: "vae_name"}
+      save_prefix: {node: "9", input: "filename_prefix"}
+    control_bindings:
+      prompt: {node: "12", input: "text"}
+      seed: {node: "7", input: "seed"}
+      steps: {node: "7", input: "steps"}
+      unet: {node: "2", input: "unet_name"}
+      clip: {node: "1", input: "clip_name"}
+      vae: {node: "3", input: "vae_name"}
+      patch: {node: "4", input: "name"}
+      reference_image: {node: "20", input: "image"}
+      strength: {node: "9", input: "strength"}
+      canny_low: {node: "14", input: "low_threshold"}
+      canny_high: {node: "14", input: "high_threshold"}
+      megapixels: {node: "15", input: "megapixels"}
+      save_prefix: {node: "21", input: "filename_prefix"}
+
+  flux2-klein:
+    workflow: "workflows/comfyui/flux2-klein-t2i-api.json"
+    width: 768
+    height: 1344
+    steps: 20
+    cfg: 5.0
+    models:
+      unet: "flux-2-klein-base-4b-fp8.safetensors"
+      clip: "qwen_3_4b.safetensors"
+      vae: "flux2-vae.safetensors"
+    bindings:
+      prompt: {node: "4", input: "text"}
+      seed: {node: "9", input: "noise_seed"}
+      steps: {node: "8", input: "steps"}
+      cfg: {node: "6", input: "cfg"}
+      width: {node: "10", input: "width"}
+      height: {node: "10", input: "height"}
+      scheduler_width: {node: "8", input: "width"}
+      scheduler_height: {node: "8", input: "height"}
+      unet: {node: "1", input: "unet_name"}
+      clip: {node: "2", input: "clip_name"}
+      vae: {node: "3", input: "vae_name"}
+      save_prefix: {node: "13", input: "filename_prefix"}
+
+  flux2-klein-edit:
+    workflow: "workflows/comfyui/flux2-klein-edit-api.json"
+    width: 768
+    height: 1344
+    steps: 20
+    cfg: 5.0
+    models:
+      unet: "flux-2-klein-base-4b-fp8.safetensors"
+      clip: "qwen_3_4b.safetensors"
+      vae: "flux2-vae.safetensors"
+    bindings:
+      prompt: {node: "7", input: "text"}
+      seed: {node: "15", input: "noise_seed"}
+      steps: {node: "14", input: "steps"}
+      cfg: {node: "12", input: "cfg"}
+      unet: {node: "1", input: "unet_name"}
+      clip: {node: "2", input: "clip_name"}
+      vae: {node: "3", input: "vae_name"}
+      reference_image: {node: "4", input: "image"}
+      megapixels: {node: "5", input: "megapixels"}
+      save_prefix: {node: "19", input: "filename_prefix"}
+
+tts:
+  engine: "chatterbox"
+  language: "pl"
+  model_version: "v3"
+  device: "cuda"
+  reference_audio: "C:/CSP/voice/narrator_reference.wav"
+  exaggeration: 0.55
+  cfg_weight: 0.35
+  temperature: 0.8
+  repetition_penalty: 1.2
+  pause_ms_between_scenes: 60
+
+whisper:
+  model: "small"
+  language: "pl"
+  device: "cuda"
+  compute_type: "int8_float16"
+
+render:
+  ffmpeg: "ffmpeg"
+  ffprobe: "ffprobe"
+  video_codec: "h264_nvenc"
+  audio_codec: "aac"
+  audio_bitrate: "192k"
+  video_bitrate: "8M"
+  preset: "p5"

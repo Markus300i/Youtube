@@ -1,0 +1,76 @@
+name: CSP Static Checks
+
+on:
+  push:
+    branches:
+      - csp-automation-v1
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lightweight validation dependency
+        run: python -m pip install PyYAML==6.0.2
+
+      - name: Python YAML JSON and CSP checks
+        run: python scripts/static_check.py
+
+      - name: Parse PowerShell setup scripts with pwsh
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem setup -Filter '*.ps1'
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$($file.Name): $($_.Message)" }
+              throw "PowerShell syntax failed: $($file.Name)"
+            }
+            Write-Host "OK PowerShell: $($file.Name)"
+          }
+
+  windows-powershell-parser:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse setup scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem setup -Filter '*.ps1'
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List * | Out-String | Write-Host
+              throw "Windows PowerShell 5.1 syntax failed: $($file.Name)"
+            }
+            Write-Host "OK Windows PowerShell 5.1: $($file.Name)"
+          }
