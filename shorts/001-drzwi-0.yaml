@@ -69,19 +69,31 @@ scenes:
     text: >-
       Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
     continuity_refs: ["basement", "basement_door"]
+    control:
+      reference_scene: 1
+      strength: 0.96
+      crop: [0.12, 0.04, 0.92, 0.96]
+      canny_low: 0.08
+      canny_high: 0.28
     prompt: >-
       Closer documentary view of the mysterious basement door squeezed between the yellow gas pipe
       and rough concrete wall, brushed-aluminum plate clearly visible but avoid readable typography,
-      exact same door geometry and damage marks, documentary close shot
+      preserve every visible pipe bend, door edge, handle position and wall stain from the control image
     motion: "slow_push"
 
   - id: 3
     text: >-
       Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
     continuity_refs: ["basement", "basement_door", "administrator"]
+    control:
+      reference_scene: 1
+      strength: 0.86
+      crop: [0.00, 0.00, 1.00, 1.00]
+      canny_low: 0.10
+      canny_high: 0.32
     prompt: >-
-      The administrator stands at a small basement utility table studying worn architectural floor plans
-      under fluorescent light, mysterious basement door visible blurred behind him,
+      Preserve the exact corridor geometry and pipes from the control image. Add the administrator at a small
+      basement utility table studying worn architectural floor plans, while the same mysterious door remains visible,
       serious realistic investigative mood, no readable text on plans
     motion: "pan_right"
 
@@ -89,32 +101,48 @@ scenes:
     text: >-
       Wieczorem jeden z lokatorów usłyszał zza drzwi trzy spokojne puknięcia.
     continuity_refs: ["basement", "basement_door", "tenant"]
+    control:
+      reference_scene: 1
+      strength: 0.90
+      crop: [0.00, 0.00, 1.00, 1.00]
+      canny_low: 0.10
+      canny_high: 0.32
     prompt: >-
-      Evening in the basement corridor, the tenant frozen several steps from the mysterious basement door,
-      listening cautiously, face partly visible in profile, door closed,
-      grounded psychological tension, no monster
+      Preserve the same corridor, pipes, wall stains, frame and closed door from the control image.
+      Evening lighting, tenant frozen several steps from the door listening cautiously,
+      face partly visible in profile, grounded psychological tension, no monster
     motion: "push_in"
 
   - id: 5
     text: >-
       Nie otworzył. Następnego ranka tabliczka z zerem leżała na podłodze, a na drzwiach ktoś wydrapał numer jego mieszkania.
     continuity_refs: ["basement", "basement_door"]
+    control:
+      reference_scene: 1
+      strength: 0.94
+      crop: [0.18, 0.22, 0.94, 1.00]
+      canny_low: 0.07
+      canny_high: 0.25
     prompt: >-
-      Morning evidence-photo close-up at floor level beside the mysterious basement door,
-      the same small brushed-aluminum plate fallen on dusty concrete,
-      fresh shallow scratches in the wood near the handle but no readable number,
-      preserve the exact door panels, handle, frame and chipped varnish
+      Evidence-photo closer view based strictly on the control image. Keep the same lower door geometry,
+      frame, gas pipe and floor lines. The brushed-aluminum plate has fallen on the dusty concrete,
+      fresh shallow scratches near the handle but no readable number
     motion: "static"
 
   - id: 6
     text: >-
       Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
     continuity_refs: ["basement", "basement_door", "administrator"]
+    control:
+      reference_scene: 1
+      strength: 0.58
+      crop: [0.00, 0.00, 1.00, 1.00]
+      canny_low: 0.10
+      canny_high: 0.32
     prompt: >-
-      The mysterious basement door is now open without changing its design,
-      Polish locksmith and administrator seen from behind at threshold,
-      revealing an impossibly narrow unfinished concrete corridor extending into darkness with one bare tungsten bulb,
-      architecture plausible and restrained, no creature
+      Preserve the surrounding basement walls, ceiling pipes, yellow gas pipe and door frame from the control image,
+      but open the same basement door inward without redesigning it. Locksmith and administrator seen from behind
+      at the threshold, revealing a narrow unfinished concrete corridor with one bare tungsten bulb, no creature
     motion: "push_in"
 
   - id: 7
@@ -132,11 +160,17 @@ scenes:
     text: >-
       Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
     continuity_refs: ["apartment_door", "administrator", "tenant", "stairwell"]
+    control:
+      reference_scene: 7
+      strength: 0.62
+      crop: [0.25, 0.10, 0.75, 0.98]
+      canny_low: 0.07
+      canny_high: 0.26
     prompt: >-
-      Ground-floor stairwell, administrator and tenant standing motionless before the tenant apartment entrance door,
-      exact same door as seen at the end of the hidden corridor, with a newly attached small brushed-aluminum plate
-      near the upper center, plate visible but avoid readable typography, tense body language,
-      final documentary horror frame, no monster
+      Use the control image to preserve the apartment door silhouette, horizontal groove spacing,
+      peephole and handle position, but place that exact door in the ground-floor stairwell.
+      Administrator and tenant stand motionless before it. A small brushed-aluminum plate is newly attached
+      near the upper center, avoid readable typography, final documentary horror frame, no monster
     motion: "slow_push"
 
 subtitles:
