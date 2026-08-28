@@ -36,8 +36,13 @@ continuity:
       circular peephole centered high, narrow vertical scuff near the lower-right edge.
       Preserve groove count, handle side, peephole position, frame color and scuff exactly.
     administrator: >-
-      The same apartment administrator: Polish man about 55 years old, short grey hair,
-      average build, navy work jacket over a charcoal sweater, tired serious face.
+      The same Polish apartment-block administrator in every appearance:
+      man about 65 years old, short thinning grey hair, rectangular reading glasses,
+      average build with slightly stooped posture, weathered natural face,
+      dark navy work jacket over a charcoal knitted sweater, dark trousers,
+      ordinary black shoes. Restrained serious expression, tired and mildly concerned.
+      He must look like a real long-time building administrator, not a businessman,
+      police officer, security guard or cinematic hero.
     tenant: >-
       The same tenant: Polish man about 32 years old, short dark brown hair,
       average build, plain black jacket, clean-shaven, tense restrained expression.
@@ -83,20 +88,58 @@ scenes:
   - id: 3
     text: >-
       Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
-    continuity_refs: ["basement", "basement_door", "administrator"]
+    continuity_refs:
+      - "basement"
+      - "basement_door"
+      - "administrator"
     render:
       mode: "flux_edit"
       reference_scene: 1
       edit_rects:
-        - [0.48, 0.31, 0.98, 0.95]
-      feather: 0.025
+        - [0.64, 0.32, 0.99, 0.96]
+      feather: 0.014
       instruction: >-
-        Edit the supplied photograph without changing the camera, door, yellow gas pipe, ceiling pipes,
-        fluorescent lamp, wall stains or floor outside the new subject area. Add the same 55-year-old Polish
-        administrator in the right foreground beside a compact folding utility table, studying worn building plans.
-        Keep the door clearly visible behind him. Photorealistic documentary evidence photograph, no readable text.
+        Edit only the designated right-side area of the supplied master photograph.
+        Preserve the original photograph exactly everywhere else.
+
+        Add one realistic Polish apartment-block administrator, about 65 years old,
+        standing naturally in the right foreground close to the concrete wall.
+        He has short thinning grey hair, rectangular reading glasses, a slightly
+        stooped average build, a weathered natural face, dark navy work jacket
+        over a charcoal knitted sweater, dark trousers and ordinary black shoes.
+
+        He is not posing for the camera. His head is slightly lowered and his
+        attention is focused on old technical building documents held naturally
+        in both hands. He holds a worn administrative folder or thick binder with
+        several aged off-white sheets and a folded technical floor plan.
+        No readable writing, labels, numbers or typography.
+
+        His expression is restrained and believable: concentrated, mildly confused
+        and increasingly concerned because the plans do not match what he sees.
+
+        Do NOT add a table, desk, chair, cabinet, trolley or any other furniture.
+        Do NOT add new pipes, electrical boxes, tools, doors, lamps or basement clutter.
+
+        The mysterious wooden door must remain clearly visible as the dominant
+        background subject. Do not redesign its wood grain, three recessed vertical
+        panels, black steel frame, black handle, metal plate or existing damage.
+
+        Preserve the yellow gas pipe, ceiling pipes, fluorescent fixture, concrete
+        walls, stains, floor texture, perspective and camera position of the master image.
+
+        Lighting on the administrator must come only from the same cold overhead
+        fluorescent fixture already present in the photograph. No cinematic rim light,
+        no warm portrait lighting, no studio lighting.
+
+        Photorealistic Polish documentary-thriller frame, natural skin texture,
+        physically plausible hands and fingers, realistic clothing folds,
+        realistic contact shadows, subtle imperfect fluorescent lighting,
+        no glamour, no stylization, no supernatural visual effects.
     prompt: >-
-      Administrator studies building plans in the unchanged master basement.
+      A real Polish building administrator quietly checks old technical plans beside
+      the mysterious basement door, realizing that according to the documents there
+      should only be a sealed technical shaft behind that wall. Restrained documentary
+      realism, mundane Polish apartment-block basement, subtle psychological unease.
     motion: "pan_right"
 
   - id: 4
