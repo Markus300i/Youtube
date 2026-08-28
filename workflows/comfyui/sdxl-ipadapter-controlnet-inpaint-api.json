@@ -26,7 +26,8 @@
       "image": ["1", 0],
       "weight": 0.72,
       "start_at": 0.0,
-      "end_at": 1.0
+      "end_at": 1.0,
+      "weight_type": "standard"
     }
   },
   "5": {
