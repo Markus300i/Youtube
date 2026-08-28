@@ -84,6 +84,7 @@ def main() -> int:
     check = Preflight()
     cfg = load_yaml("config/models.yaml")
     image_cfg = cfg["image_models"]["z-image-turbo"]
+    flux_cfg = cfg["image_models"].get("flux2-klein-edit") or {}
     comfy_url = os.getenv("CSP_COMFY_URL", cfg["comfyui"]["base_url"]).rstrip("/")
 
     print("== CSP AUTOMATION PREFLIGHT ==")
@@ -93,7 +94,6 @@ def main() -> int:
     print(f"ComfyUI:    {comfy_url}")
     print()
 
-    # NVIDIA / CUDA
     if shutil.which("nvidia-smi"):
         code, text = run_text(
             [
@@ -123,7 +123,6 @@ def main() -> int:
     except Exception as exc:
         check.fail(f"Nie można zaimportować/uruchomić PyTorch CUDA: {exc}")
 
-    # Required Python modules
     for module in ("yaml", "requests", "faster_whisper", "PIL"):
         try:
             __import__(module)
@@ -138,7 +137,6 @@ def main() -> int:
     except Exception as exc:
         check.fail(f"Chatterbox Multilingual nie ładuje się: {exc}")
 
-    # FFmpeg
     ffmpeg = str(cfg["render"].get("ffmpeg", "ffmpeg"))
     ffprobe = str(cfg["render"].get("ffprobe", "ffprobe"))
     if shutil.which(ffmpeg):
@@ -161,7 +159,6 @@ def main() -> int:
     else:
         check.fail(f"Nie znaleziono ffprobe: {ffprobe}")
 
-    # Persistent directories / voice identity
     try:
         OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
         probe = OUTPUT_ROOT / ".csp-write-test"
@@ -183,7 +180,6 @@ def main() -> int:
                 f"Brak referencji narratora: {reference}. TTS zadziała, ale własny stały głos nie będzie zagwarantowany."
             )
 
-    # ComfyUI API
     try:
         response = requests.get(f"{comfy_url}/system_stats", timeout=10)
         response.raise_for_status()
@@ -224,6 +220,17 @@ def main() -> int:
             }
         )
 
+    flux_classes = {
+        "VAEEncode",
+        "ReferenceLatent",
+        "CFGGuider",
+        "KSamplerSelect",
+        "Flux2Scheduler",
+        "RandomNoise",
+        "EmptyFlux2LatentImage",
+        "SamplerCustomAdvanced",
+    }
+
     try:
         response = requests.get(f"{comfy_url}/object_info", timeout=30)
         response.raise_for_status()
@@ -232,7 +239,7 @@ def main() -> int:
         if missing_classes:
             check.fail("ComfyUI nie ma wymaganych node'ów: " + ", ".join(missing_classes))
         else:
-            check.ok("Wszystkie wymagane core nodes ComfyUI są dostępne")
+            check.ok("Wszystkie wymagane core nodes Z-Image są dostępne")
 
         models = image_cfg.get("models") or {}
         for kind, filename in models.items():
@@ -245,13 +252,31 @@ def main() -> int:
                     f"ComfyUI nie widzi modelu {kind}: {filename}. "
                     "Uruchom setup/install-zimage.ps1 i zrestartuj ComfyUI."
                 )
+
+        missing_flux_classes = sorted(flux_classes - set(object_info))
+        if missing_flux_classes:
+            check.warn(
+                "FLUX.2 image edit nie jest jeszcze dostępny w tej wersji ComfyUI: "
+                + ", ".join(missing_flux_classes)
+            )
+        else:
+            check.ok("Core nodes FLUX.2 image edit są dostępne")
+
+        for kind, filename in (flux_cfg.get("models") or {}).items():
+            if find_recursive(object_info, str(filename)):
+                check.ok(f"ComfyUI widzi FLUX.2 {kind}: {filename}")
+            else:
+                check.warn(
+                    f"Brak FLUX.2 {kind}: {filename}. "
+                    "Scena 2 (crop mastera) zadziała, ale sceny edytowane wymagają "
+                    "setup/install-flux2-klein.ps1 oraz restartu ComfyUI."
+                )
     except Exception as exc:
         check.fail(f"Nie udało się odczytać /object_info ComfyUI: {exc}")
 
-    workflow_path = ROOT / image_cfg["workflow"]
     validate_workflow_bindings(
         check,
-        workflow_path,
+        ROOT / image_cfg["workflow"],
         image_cfg.get("bindings") or {},
         "Z-Image T2I",
     )
@@ -263,6 +288,14 @@ def main() -> int:
             ROOT / str(control_workflow),
             image_cfg.get("control_bindings") or {},
             "Z-Image ControlNet",
+        )
+
+    if flux_cfg:
+        validate_workflow_bindings(
+            check,
+            ROOT / str(flux_cfg["workflow"]),
+            flux_cfg.get("bindings") or {},
+            "FLUX.2 Klein edit",
         )
 
     return finish(check)
