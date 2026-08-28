@@ -75,7 +75,7 @@ if ($ForceRestartComfy -and $wasRunning) {
     Stop-ComfyOnPort
     Start-Comfy
 }
-elif (-not $wasRunning) {
+elseif (-not $wasRunning) {
     Start-Comfy
 }
 else {
