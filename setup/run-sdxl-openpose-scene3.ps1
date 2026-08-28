@@ -4,7 +4,9 @@ param(
     [string]$CspPython = "C:\CSP\venv\Scripts\python.exe",
     [string]$Reference = "C:\CSP\output\001-drzwi-0\images\scene-01.png",
     [string]$ComfyUrl = "http://127.0.0.1:8188",
+    [string]$CheckpointName = "RealVisXL_V5.0_fp16.safetensors",
     [switch]$InstallModel,
+    [switch]$InstallCheckpoint,
     [switch]$ForceRestartComfy
 )
 
@@ -91,15 +93,41 @@ function Ensure-OpenPoseModel {
     return $true
 }
 
+function Ensure-Checkpoint {
+    $target = Join-Path $ComfyRoot ("models\checkpoints\" + $CheckpointName)
+    if (Test-Path $target) {
+        Write-Host "OK   RealVisXL V5.0 fp16 checkpoint" -ForegroundColor Green
+        return $false
+    }
+
+    if (-not $InstallCheckpoint) {
+        throw "Missing RealVisXL checkpoint: $target`nRun again with -InstallCheckpoint."
+    }
+
+    $dir = Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $part = "$target.part"
+    $url = "https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0_fp16.safetensors?download=true"
+
+    Write-Host "GET  RealVisXL V5.0 fp16 (~6.94 GB)" -ForegroundColor Cyan
+    Write-Host "     $target"
+    & curl.exe -L --fail --retry 5 --retry-delay 3 -C - -o $part $url
+    if ($LASTEXITCODE -ne 0) {
+        throw "Download failed: RealVisXL V5.0 fp16"
+    }
+    Move-Item -Force $part $target
+    Write-Host "DONE RealVisXL V5.0 fp16" -ForegroundColor Green
+    return $true
+}
+
 Assert-Exists $RepoRoot "Repository"
 Assert-Exists $ComfyRoot "ComfyUI root"
 Assert-Exists $CspPython "CSP Python"
 Assert-Exists $Reference "Scene 1 master"
 
-$checkpoint = Join-Path $ComfyRoot "models\checkpoints\sd_xl_base_1.0.safetensors"
-Assert-Exists $checkpoint "SDXL Base 1.0 checkpoint"
-
-$downloaded = Ensure-OpenPoseModel
+$openPoseDownloaded = Ensure-OpenPoseModel
+$checkpointDownloaded = Ensure-Checkpoint
+$downloaded = $openPoseDownloaded -or $checkpointDownloaded
 $wasRunning = Test-Comfy
 
 if ($ForceRestartComfy -or ($downloaded -and $wasRunning)) {
@@ -129,10 +157,17 @@ $logFile = Join-Path $logDir "sdxl-openpose-scene3.log"
 
 Push-Location $RepoRoot
 try {
-    Write-Host "RUN  SDXL + OpenPose inpaint scene 3" -ForegroundColor Cyan
+    Write-Host "RUN  FINAL RealVisXL + OpenPose inpaint scene 3" -ForegroundColor Cyan
+    Write-Host "     checkpoint=$CheckpointName | steps=40 | cfg=6.5 | CN=0.58 | end=0.55" -ForegroundColor DarkGray
     $oldErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $pythonOutput = & $CspPython -u $testScript $shortFile --reference $Reference 2>&1
+    $pythonOutput = & $CspPython -u $testScript $shortFile `
+        --reference $Reference `
+        --checkpoint $CheckpointName `
+        --steps 40 `
+        --cfg 6.5 `
+        --control-strength 0.58 `
+        --control-end 0.55 2>&1
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $oldErrorAction
 
@@ -142,7 +177,7 @@ try {
         Write-Host ""
         Write-Host "FAILED - full Python/ComfyUI error is above." -ForegroundColor Red
         Write-Host "LOG  $logFile" -ForegroundColor Yellow
-        throw "SDXL OpenPose test failed with exit code $exitCode. See $logFile"
+        throw "Final RealVisXL/OpenPose test failed with exit code $exitCode. See $logFile"
     }
 }
 finally {
