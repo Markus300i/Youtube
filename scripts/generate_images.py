@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 from common import ROOT, load_yaml, short_output_dir
 
@@ -88,6 +88,7 @@ def download_first_image(
         f"{base_url}/view", params=params, timeout=120
     )
     response.raise_for_status()
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(response.content)
 
 
@@ -157,7 +158,10 @@ def continuity_prompt(short: dict[str, Any], scene: dict[str, Any]) -> str:
     return ". ".join(part for part in parts if part)
 
 
-def scene_seed(short: dict[str, Any], scene_id: int, base_seed: int) -> int:
+def scene_seed(short: dict[str, Any], scene: dict[str, Any], base_seed: int) -> int:
+    if scene.get("seed") is not None:
+        return int(scene["seed"])
+    scene_id = int(scene["id"])
     continuity = short.get("continuity") or {}
     mode = str(continuity.get("seed_mode", "per_scene")).strip().lower()
     if mode == "shared":
@@ -183,7 +187,7 @@ def normalized_crop_box(
     )
 
 
-def prepare_control_image(
+def prepare_reference_image(
     reference: Path,
     target: Path,
     crop: Any,
@@ -199,17 +203,59 @@ def prepare_control_image(
         image.save(target, format="PNG", optimize=True)
 
 
-def free_comfy_memory(base_url: str) -> None:
-    try:
-        response = requests.post(
-            f"{base_url}/free",
-            json={"unload_models": True, "free_memory": True},
-            timeout=30,
+def mask_from_rects(
+    rects: Any, width: int, height: int, feather: float
+) -> Image.Image:
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    if isinstance(rects, (list, tuple)):
+        for rect in rects:
+            if not isinstance(rect, (list, tuple)) or len(rect) != 4:
+                continue
+            box = normalized_crop_box(rect, width, height)
+            draw.rectangle(box, fill=255)
+    radius = max(0.0, float(feather)) * min(width, height)
+    if radius > 0:
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=radius))
+    return mask
+
+
+def composite_edit(
+    base_path: Path,
+    edited_path: Path,
+    target: Path,
+    edit_rects: Any,
+    preserve_rects: Any,
+    feather: float,
+    width: int,
+    height: int,
+) -> None:
+    with Image.open(base_path) as base_source:
+        base = base_source.convert("RGB").resize(
+            (width, height), Image.Resampling.LANCZOS
         )
-        response.raise_for_status()
-        print("COMFY: requested model unload / VRAM release")
-    except Exception as exc:  # image files are already safe; don't hide that fact
-        print(f"WARN: nie udało się zwolnić pamięci ComfyUI: {exc}")
+    with Image.open(edited_path) as edited_source:
+        edited = edited_source.convert("RGB").resize(
+            (width, height), Image.Resampling.LANCZOS
+        )
+
+    # With edit_rects, only those regions may change. Everything else is
+    # restored from the MASTER SET image byte-for-byte after resizing.
+    if edit_rects:
+        edit_mask = mask_from_rects(edit_rects, width, height, feather)
+        result = Image.composite(edited, base, edit_mask)
+    else:
+        result = edited
+
+    # preserve_rects are a final continuity lock applied after the edit.
+    if preserve_rects:
+        preserve_mask = mask_from_rects(
+            preserve_rects, width, height, feather
+        )
+        result = Image.composite(base, result, preserve_mask)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    result.save(target, format="PNG", optimize=True)
 
 
 def render_workflow(
@@ -230,6 +276,45 @@ def render_workflow(
     download_first_image(base_url, history, save_node, target)
 
 
+def load_workflow(model_cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    workflow_path = ROOT / str(model_cfg["workflow"])
+    if not workflow_path.exists():
+        raise FileNotFoundError(f"Brak workflow ComfyUI: {workflow_path}")
+    return (
+        json.loads(workflow_path.read_text(encoding="utf-8")),
+        model_cfg.get("bindings") or {},
+    )
+
+
+def scene_reference(
+    output_dir: Path, scene_id: int, render_cfg: dict[str, Any]
+) -> Path:
+    ref_scene = int(render_cfg.get("reference_scene", 0))
+    if ref_scene < 1 or ref_scene >= scene_id:
+        raise ValueError(
+            f"Scena {scene_id}: reference_scene musi wskazywać wcześniejszą scenę"
+        )
+    reference = output_dir / f"scene-{ref_scene:02d}.png"
+    if not reference.exists():
+        raise FileNotFoundError(
+            f"Scena {scene_id}: brak obrazu referencyjnego {reference}"
+        )
+    return reference
+
+
+def free_comfy_memory(base_url: str) -> None:
+    try:
+        response = requests.post(
+            f"{base_url}/free",
+            json={"unload_models": True, "free_memory": True},
+            timeout=30,
+        )
+        response.raise_for_status()
+        print("COMFY: requested model unload / VRAM release")
+    except Exception as exc:
+        print(f"WARN: nie udało się zwolnić pamięci ComfyUI: {exc}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("short_file")
@@ -244,49 +329,35 @@ def main() -> None:
     config = load_yaml("config/models.yaml")
     comfy = config["comfyui"]
     base_url = os.getenv("CSP_COMFY_URL", comfy["base_url"]).rstrip("/")
-    model_cfg = config["image_models"][short["image_model"]]
 
-    workflow_path = ROOT / model_cfg["workflow"]
-    if not workflow_path.exists():
-        raise FileNotFoundError(f"Brak workflow ComfyUI: {workflow_path}")
-
-    bindings = model_cfg.get("bindings") or {}
-    required_bindings = {"prompt", "seed", "width", "height", "steps", "save_prefix"}
-    missing = sorted(required_bindings - set(bindings))
+    base_model_cfg = config["image_models"][short["image_model"]]
+    base_workflow, base_bindings = load_workflow(base_model_cfg)
+    required = {"prompt", "seed", "width", "height", "steps", "save_prefix"}
+    missing = sorted(required - set(base_bindings))
     if missing:
         raise RuntimeError(
-            f"Model {short['image_model']} nie ma kompletu bindings: {', '.join(missing)}"
+            f"Model {short['image_model']} nie ma kompletu bindings: "
+            + ", ".join(missing)
         )
-
-    workflow_template = json.loads(workflow_path.read_text(encoding="utf-8"))
-
-    control_template: dict[str, Any] | None = None
-    control_bindings = model_cfg.get("control_bindings") or {}
-    control_workflow_raw = model_cfg.get("control_workflow")
-    if control_workflow_raw:
-        control_path = ROOT / str(control_workflow_raw)
-        if not control_path.exists():
-            raise FileNotFoundError(f"Brak ControlNet workflow: {control_path}")
-        control_template = json.loads(control_path.read_text(encoding="utf-8"))
 
     output_dir = short_output_dir(short) / "images"
     output_dir.mkdir(parents=True, exist_ok=True)
-    control_dir = short_output_dir(short) / "control"
-    control_dir.mkdir(parents=True, exist_ok=True)
+    edit_dir = short_output_dir(short) / "edit"
+    edit_dir.mkdir(parents=True, exist_ok=True)
 
     wait_for_comfy(base_url)
 
-    # 8 GB VRAM: tylko jedna scena jest jednocześnie w kolejce.
     base_seed = deterministic_seed(short)
     style = str(short.get("visual_style", "")).strip()
-    width = int(model_cfg.get("width", 768))
-    height = int(model_cfg.get("height", 1344))
-    steps = int(model_cfg.get("steps", 8))
-    control_steps = int(model_cfg.get("control_steps", max(steps, 9)))
-    models = model_cfg.get("models") or {}
-    megapixels = (width * height) / 1_000_000
+    width = int(base_model_cfg.get("width", 768))
+    height = int(base_model_cfg.get("height", 1344))
+    steps = int(base_model_cfg.get("steps", 8))
+    base_models = base_model_cfg.get("models") or {}
+    base_save_node = str(base_bindings["save_prefix"]["node"])
 
-    save_node = str(bindings["save_prefix"]["node"])
+    flux_cfg = config["image_models"].get("flux2-klein-edit")
+    flux_template: dict[str, Any] | None = None
+    flux_bindings: dict[str, Any] = {}
 
     for scene in short["scenes"]:
         scene_id = int(scene["id"])
@@ -295,137 +366,168 @@ def main() -> None:
             print(f"SKIP {target.name}")
             continue
 
+        render_cfg = scene.get("render") or {}
+        mode = str(render_cfg.get("mode", "generate")).strip().lower()
         continuity = continuity_prompt(short, scene)
         final_prompt = ". ".join(
             part
             for part in (style, continuity, str(scene["prompt"]).strip())
             if part
         )
-        seed = scene_seed(short, scene_id, base_seed)
-        control = scene.get("control") or {}
+        seed = scene_seed(short, scene, base_seed)
 
-        if control:
-            if control_template is None:
-                raise RuntimeError(
-                    f"Scena {scene_id} wymaga ControlNet, ale model nie ma control_workflow"
-                )
-            required_control = {
-                "prompt",
-                "seed",
-                "steps",
-                "unet",
-                "clip",
-                "vae",
-                "patch",
-                "reference_image",
-                "strength",
-                "canny_low",
-                "canny_high",
-                "megapixels",
-                "save_prefix",
-            }
-            missing_control = sorted(required_control - set(control_bindings))
-            if missing_control:
-                raise RuntimeError(
-                    "Brak control bindings: " + ", ".join(missing_control)
-                )
-
-            ref_scene = int(control.get("reference_scene", 0))
-            if ref_scene < 1 or ref_scene >= scene_id:
-                raise ValueError(
-                    f"Scena {scene_id}: reference_scene musi wskazywać wcześniejszą scenę"
-                )
-            reference = output_dir / f"scene-{ref_scene:02d}.png"
-            if not reference.exists():
-                raise FileNotFoundError(
-                    f"Scena {scene_id}: brak obrazu referencyjnego {reference}"
-                )
-
-            control_image = control_dir / f"scene-{scene_id:02d}-from-{ref_scene:02d}.png"
-            prepare_control_image(
+        if mode == "crop":
+            reference = scene_reference(output_dir, scene_id, render_cfg)
+            prepare_reference_image(
                 reference,
-                control_image,
-                control.get("crop"),
+                target,
+                render_cfg.get("crop"),
                 width,
                 height,
             )
-            remote_name = f"csp_{short['id']}_control_{scene_id:02d}.png"
-            uploaded = upload_input_image(base_url, control_image, remote_name)
-
-            workflow = copy.deepcopy(control_template)
-            apply_binding(workflow, control_bindings.get("prompt"), final_prompt)
-            apply_binding(workflow, control_bindings.get("seed"), seed)
-            apply_binding(workflow, control_bindings.get("steps"), control_steps)
-            apply_binding(workflow, control_bindings.get("unet"), models.get("unet"))
-            apply_binding(workflow, control_bindings.get("clip"), models.get("clip"))
-            apply_binding(workflow, control_bindings.get("vae"), models.get("vae"))
-            apply_binding(workflow, control_bindings.get("patch"), models.get("patch"))
-            apply_binding(workflow, control_bindings.get("reference_image"), uploaded)
-            apply_binding(
-                workflow,
-                control_bindings.get("strength"),
-                float(control.get("strength", 0.9)),
-            )
-            apply_binding(
-                workflow,
-                control_bindings.get("canny_low"),
-                float(control.get("canny_low", 0.1)),
-            )
-            apply_binding(
-                workflow,
-                control_bindings.get("canny_high"),
-                float(control.get("canny_high", 0.32)),
-            )
-            apply_binding(
-                workflow,
-                control_bindings.get("megapixels"),
-                megapixels,
-            )
-            apply_binding(
-                workflow,
-                control_bindings.get("save_prefix"),
-                f"csp_{short['id']}_scene_{scene_id:02d}_control",
-            )
-            control_save_node = str(control_bindings["save_prefix"]["node"])
             print(
-                f"GENERATE scene {scene_id}/8 via Z-Image ControlNet "
-                f"ref={ref_scene}, strength={float(control.get('strength', 0.9)):.2f}, "
-                f"seed={seed}"
+                f"CROP scene {scene_id}/8 from scene "
+                f"{int(render_cfg['reference_scene'])} -> {width}x{height}"
+            )
+            print(f"SAVED {target}")
+            continue
+
+        if mode == "flux_edit":
+            if not flux_cfg:
+                raise RuntimeError("Brak konfiguracji image_models.flux2-klein-edit")
+            if flux_template is None:
+                flux_template, flux_bindings = load_workflow(flux_cfg)
+
+            required_flux = {
+                "prompt",
+                "seed",
+                "steps",
+                "cfg",
+                "unet",
+                "clip",
+                "vae",
+                "reference_image",
+                "megapixels",
+                "save_prefix",
+            }
+            missing_flux = sorted(required_flux - set(flux_bindings))
+            if missing_flux:
+                raise RuntimeError(
+                    "FLUX.2 edit bindings są niekompletne: "
+                    + ", ".join(missing_flux)
+                )
+
+            reference = scene_reference(output_dir, scene_id, render_cfg)
+            base_path = edit_dir / f"scene-{scene_id:02d}-base.png"
+            edited_path = edit_dir / f"scene-{scene_id:02d}-raw.png"
+            prepare_reference_image(
+                reference,
+                base_path,
+                render_cfg.get("crop"),
+                width,
+                height,
+            )
+            remote_name = f"csp_{short['id']}_edit_{scene_id:02d}.png"
+            uploaded = upload_input_image(base_url, base_path, remote_name)
+
+            workflow = copy.deepcopy(flux_template)
+            flux_models = flux_cfg.get("models") or {}
+            instruction = str(render_cfg.get("instruction") or final_prompt).strip()
+            apply_binding(workflow, flux_bindings.get("prompt"), instruction)
+            apply_binding(workflow, flux_bindings.get("seed"), seed + 20_000)
+            apply_binding(
+                workflow,
+                flux_bindings.get("steps"),
+                int(render_cfg.get("steps", flux_cfg.get("steps", 20))),
+            )
+            apply_binding(
+                workflow,
+                flux_bindings.get("cfg"),
+                float(render_cfg.get("cfg", flux_cfg.get("cfg", 5.0))),
+            )
+            apply_binding(
+                workflow, flux_bindings.get("unet"), flux_models.get("unet")
+            )
+            apply_binding(
+                workflow, flux_bindings.get("clip"), flux_models.get("clip")
+            )
+            apply_binding(
+                workflow, flux_bindings.get("vae"), flux_models.get("vae")
+            )
+            apply_binding(
+                workflow, flux_bindings.get("reference_image"), uploaded
+            )
+            apply_binding(
+                workflow,
+                flux_bindings.get("megapixels"),
+                (width * height) / 1_000_000,
+            )
+            apply_binding(
+                workflow,
+                flux_bindings.get("save_prefix"),
+                f"csp_{short['id']}_scene_{scene_id:02d}_fluxedit",
+            )
+
+            print(
+                f"EDIT scene {scene_id}/8 via FLUX.2 Klein 4B "
+                f"from scene {int(render_cfg['reference_scene'])}"
             )
             render_workflow(
                 base_url=base_url,
                 comfy=comfy,
                 workflow=workflow,
-                save_node=control_save_node,
-                target=target,
+                save_node=str(flux_bindings["save_prefix"]["node"]),
+                target=edited_path,
             )
-        else:
-            workflow = copy.deepcopy(workflow_template)
-            apply_binding(workflow, bindings.get("prompt"), final_prompt)
-            apply_binding(workflow, bindings.get("seed"), seed)
-            apply_binding(workflow, bindings.get("steps"), steps)
-            apply_binding(workflow, bindings.get("width"), width)
-            apply_binding(workflow, bindings.get("height"), height)
-            apply_binding(workflow, bindings.get("unet"), models.get("unet"))
-            apply_binding(workflow, bindings.get("clip"), models.get("clip"))
-            apply_binding(workflow, bindings.get("vae"), models.get("vae"))
-            apply_binding(
-                workflow,
-                bindings.get("save_prefix"),
-                f"csp_{short['id']}_scene_{scene_id:02d}",
+            composite_edit(
+                base_path,
+                edited_path,
+                target,
+                render_cfg.get("edit_rects") or render_cfg.get("mask_rects"),
+                render_cfg.get("preserve_rects"),
+                float(render_cfg.get("feather", 0.02)),
+                width,
+                height,
             )
-            print(
-                f"GENERATE scene {scene_id}/8 via {short['image_model']} "
-                f"({width}x{height}, {steps} steps, seed={seed})"
-            )
-            render_workflow(
-                base_url=base_url,
-                comfy=comfy,
-                workflow=workflow,
-                save_node=save_node,
-                target=target,
+            print(f"SAVED {target}")
+            continue
+
+        if mode != "generate":
+            raise ValueError(
+                f"Scena {scene_id}: nieobsługiwany render.mode '{mode}'"
             )
 
+        workflow = copy.deepcopy(base_workflow)
+        apply_binding(workflow, base_bindings.get("prompt"), final_prompt)
+        apply_binding(workflow, base_bindings.get("seed"), seed)
+        apply_binding(workflow, base_bindings.get("steps"), steps)
+        apply_binding(workflow, base_bindings.get("width"), width)
+        apply_binding(workflow, base_bindings.get("height"), height)
+        apply_binding(
+            workflow, base_bindings.get("unet"), base_models.get("unet")
+        )
+        apply_binding(
+            workflow, base_bindings.get("clip"), base_models.get("clip")
+        )
+        apply_binding(
+            workflow, base_bindings.get("vae"), base_models.get("vae")
+        )
+        apply_binding(
+            workflow,
+            base_bindings.get("save_prefix"),
+            f"csp_{short['id']}_scene_{scene_id:02d}",
+        )
+        print(
+            f"GENERATE scene {scene_id}/8 via {short['image_model']} "
+            f"({width}x{height}, {steps} steps, seed={seed})"
+        )
+        render_workflow(
+            base_url=base_url,
+            comfy=comfy,
+            workflow=workflow,
+            save_node=base_save_node,
+            target=target,
+        )
         print(f"SAVED {target}")
 
     if comfy.get("free_after_images", True):
