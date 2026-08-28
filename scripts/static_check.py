@@ -4,7 +4,6 @@ import ast
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 import yaml
 
@@ -124,7 +123,41 @@ def check_comfy_workflow() -> None:
     if control["7"]["inputs"].get("steps") != 9:
         fail("Z-Image ControlNet workflow powinien domyślnie używać 9 kroków")
 
-    print("[OK] ComfyUI Z-Image T2I + ControlNet graphs + bindings")
+    flux = config["image_models"]["flux2-klein-edit"]
+    flux_path = ROOT / flux["workflow"]
+    try:
+        edit_graph = json.loads(flux_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        fail(f"ComfyUI FLUX.2 edit JSON: {exc}")
+
+    validate_graph(
+        edit_graph,
+        flux.get("bindings") or {},
+        {
+            "UNETLoader",
+            "CLIPLoader",
+            "VAELoader",
+            "LoadImage",
+            "ImageScaleToTotalPixels",
+            "GetImageSize",
+            "CLIPTextEncode",
+            "VAEEncode",
+            "ReferenceLatent",
+            "CFGGuider",
+            "KSamplerSelect",
+            "Flux2Scheduler",
+            "RandomNoise",
+            "EmptyFlux2LatentImage",
+            "SamplerCustomAdvanced",
+            "VAEDecode",
+            "SaveImage",
+        },
+        "FLUX.2 Klein edit",
+    )
+    if edit_graph["14"]["inputs"].get("steps") != 20:
+        fail("FLUX.2 edit workflow powinien domyślnie używać 20 kroków")
+
+    print("[OK] ComfyUI Z-Image + ControlNet + FLUX.2 edit graphs + bindings")
 
 
 def check_short() -> None:
@@ -165,6 +198,7 @@ def check_setup_files() -> None:
     required = [
         ROOT / "setup" / "windows-bootstrap.ps1",
         ROOT / "setup" / "install-zimage.ps1",
+        ROOT / "setup" / "install-flux2-klein.ps1",
         ROOT / "setup" / "install-github-runner.ps1",
         ROOT / "setup" / "ensure-comfyui.ps1",
     ]
