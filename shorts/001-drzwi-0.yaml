@@ -34,7 +34,7 @@ continuity:
       The exact same tenant apartment entrance door in every appearance: medium brown laminate door,
       six shallow horizontal grooves, dark brown frame, brushed-steel lever handle on the right,
       circular peephole centered high, narrow vertical scuff near the lower-right edge.
-      Preserve the groove count, handle side, peephole position, frame color and scuff exactly.
+      Preserve groove count, handle side, peephole position, frame color and scuff exactly.
     administrator: >-
       The same apartment administrator: Polish man about 55 years old, short grey hair,
       average build, navy work jacket over a charcoal sweater, tired serious face.
@@ -45,6 +45,7 @@ continuity:
       The same ground-floor stairwell of the building: worn beige terrazzo steps,
       pale dirty cream walls, dark brown wooden handrail, old frosted glass window,
       cold practical lighting, authentic 1980s Polish apartment-block interior.
+
 narration: >-
   W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
   Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
@@ -54,96 +55,110 @@ narration: >-
   Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
   Na jego końcu stały identyczne drzwi jak te do mieszkania lokatora.
   Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
+
 scenes:
   - id: 1
     text: >-
       W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
     continuity_refs: ["basement", "basement_door"]
     prompt: >-
-      Wide documentary shot of the basement corridor, the mysterious basement door at the far end,
-      door fully visible and unobstructed, believable mundane environment, no people,
-      uneasy but subtle, 35mm lens
+      MASTER SET. Wide documentary shot of the basement corridor, mysterious basement door at the far end,
+      door fully visible and unobstructed, no people, believable mundane environment, uneasy but subtle, 35mm lens.
+      This frame establishes the immutable basement architecture for later scenes.
     motion: "push_in"
 
   - id: 2
     text: >-
       Były wciśnięte między rurę gazową a betonową ścianę i miały małą metalową tabliczkę z numerem zero.
     continuity_refs: ["basement", "basement_door"]
-    control:
+    render:
+      mode: "crop"
       reference_scene: 1
-      strength: 0.62
-      crop: [0.28, 0.08, 0.84, 0.94]
-      canny_low: 0.14
-      canny_high: 0.38
+      crop: [0.14, 0.16, 0.86, 0.96]
     prompt: >-
-      A genuinely new closer camera position, not the previous wide composition. Move the camera several meters
-      physically closer so the same mysterious basement door fills about seventy percent of frame height.
-      Keep the recognizable yellow gas pipe, door frame, handle side and major pipe bends from the control image,
-      but allow perspective and framing to change. The brushed-aluminum plate is clearly visible but has no readable typography.
+      Exact closer photographic view of the master basement door. No generative redesign:
+      preserve the identical door, handle, plate, pipe bends, wall stains and fluorescent fixture.
     motion: "slow_push"
 
   - id: 3
     text: >-
       Administrator sprawdził plany budynku. Za tą ścianą powinien znajdować się tylko zasypany kanał techniczny.
     continuity_refs: ["basement", "basement_door", "administrator"]
-    control:
+    render:
+      mode: "flux_edit"
       reference_scene: 1
-      strength: 0.72
-      crop: [0.00, 0.00, 1.00, 1.00]
-      canny_low: 0.13
-      canny_high: 0.38
+      edit_rects:
+        - [0.48, 0.31, 0.98, 0.95]
+      feather: 0.025
+      instruction: >-
+        Edit the supplied photograph without changing the camera, door, yellow gas pipe, ceiling pipes,
+        fluorescent lamp, wall stains or floor outside the new subject area. Add the same 55-year-old Polish
+        administrator in the right foreground beside a compact folding utility table, studying worn building plans.
+        Keep the door clearly visible behind him. Photorealistic documentary evidence photograph, no readable text.
     prompt: >-
-      Preserve the recognizable corridor layout and major pipes from the control image, but use a new medium camera angle.
-      Add the administrator at a small basement utility table studying worn architectural floor plans,
-      while the same mysterious door remains visible in the background, no readable text on plans.
+      Administrator studies building plans in the unchanged master basement.
     motion: "pan_right"
 
   - id: 4
     text: >-
       Wieczorem jeden z lokatorów usłyszał zza drzwi trzy spokojne puknięcia.
     continuity_refs: ["basement", "basement_door", "tenant"]
-    control:
+    render:
+      mode: "flux_edit"
       reference_scene: 1
-      strength: 0.70
-      crop: [0.00, 0.00, 1.00, 1.00]
-      canny_low: 0.13
-      canny_high: 0.38
+      edit_rects:
+        - [0.03, 0.30, 0.49, 0.96]
+      feather: 0.025
+      instruction: >-
+        Edit the supplied photograph while keeping all architecture outside the subject area identical.
+        Add the same 32-year-old Polish tenant in the left foreground, several steps from the closed door,
+        partly in profile and listening tensely. Make the light feel slightly later in the evening without
+        redesigning the door, frame, pipes, lamp, walls or floor. No monster.
     prompt: >-
-      Same basement and same closed door, but a distinct evening camera setup with the tenant several steps away.
-      Preserve major pipe paths, door silhouette and handle side while allowing perspective to change.
-      Tenant listens cautiously, face partly visible in profile, grounded psychological tension, no monster.
+      Tenant listens to three knocks in the unchanged basement.
     motion: "push_in"
 
   - id: 5
     text: >-
       Nie otworzył. Następnego ranka tabliczka z zerem leżała na podłodze, a na drzwiach ktoś wydrapał numer jego mieszkania.
     continuity_refs: ["basement", "basement_door"]
-    control:
+    render:
+      mode: "flux_edit"
       reference_scene: 1
-      strength: 0.68
-      crop: [0.22, 0.36, 0.90, 1.00]
-      canny_low: 0.12
-      canny_high: 0.36
+      crop: [0.14, 0.22, 0.86, 1.00]
+      edit_rects:
+        - [0.30, 0.16, 0.70, 0.47]
+        - [0.18, 0.63, 0.84, 0.98]
+      feather: 0.018
+      instruction: >-
+        Keep this close view of the exact same door unchanged except for two evidence details.
+        Remove the brushed-aluminum plate from its original mounting position and place that exact plate
+        on the dusty concrete floor near the threshold. Add fresh shallow scratches in the wood near the handle.
+        Do not alter the door panels, handle, frame, surviving wall texture or visible pipe geometry.
+        No readable number or typography.
     prompt: >-
-      A new low evidence-photo camera angle close to the floor, not a repeat of scene one.
-      Preserve the same lower door, frame, gas pipe and floor junctions. The small brushed-aluminum plate lies
-      on dusty concrete and fresh shallow scratches appear near the same handle, no readable number.
+      Evidence close-up: fallen plate and new scratches on the same door.
     motion: "static"
 
   - id: 6
     text: >-
       Administrator wezwał ślusarza. Gdy zamek puścił, za drzwiami nie było pomieszczenia, tylko wąski korytarz oświetlony jedną żarówką.
     continuity_refs: ["basement", "basement_door", "administrator"]
-    control:
+    render:
+      mode: "flux_edit"
       reference_scene: 1
-      strength: 0.48
-      crop: [0.00, 0.00, 1.00, 1.00]
-      canny_low: 0.14
-      canny_high: 0.40
+      edit_rects:
+        - [0.25, 0.27, 0.76, 0.89]
+      feather: 0.022
+      instruction: >-
+        Preserve the supplied basement photograph exactly outside the door opening. Open the same wooden door inward,
+        keeping its walnut material and three-panel design visible on the door leaf. Behind the unchanged black frame,
+        reveal an impossibly narrow unfinished concrete corridor with one bare warm tungsten bulb.
+        Add partial silhouettes of the locksmith and administrator at the threshold only if they fit inside the edit area.
+        Do not move or redesign the yellow gas pipe, fluorescent lamp, surrounding concrete, frame or floor outside the mask.
+        No creature.
     prompt: >-
-      Preserve the recognizable surrounding basement, yellow gas pipe and door frame, but use a distinct closer angle.
-      Open the same basement door inward without redesigning it. Locksmith and administrator are seen from behind
-      at the threshold, revealing a narrow unfinished concrete corridor with one bare tungsten bulb, no creature.
+      The same basement door opens onto an impossible narrow corridor.
     motion: "push_in"
 
   - id: 7
@@ -151,27 +166,34 @@ scenes:
       Na jego końcu stały identyczne drzwi jak te do mieszkania lokatora.
     continuity_refs: ["apartment_door"]
     prompt: >-
-      Long telephoto view straight down the newly revealed narrow unfinished concrete corridor,
-      the tenant apartment entrance door standing alone at the distant end under one weak bare bulb,
-      exact six horizontal grooves, peephole, steel handle and lower-right scuff visible,
-      no people, oppressive symmetry, realistic depth
+      MASTER APARTMENT DOOR. Telephoto view down the newly revealed narrow concrete corridor.
+      The tenant apartment entrance door is centered and large enough to occupy roughly forty percent of frame width
+      and fifty percent of frame height: medium brown laminate, exactly six shallow horizontal grooves,
+      circular peephole, brushed-steel lever handle on the right, narrow lower-right scuff.
+      One weak bare bulb, no people, oppressive symmetry, realistic documentary depth.
     motion: "slow_push"
 
   - id: 8
     text: >-
       Najgorsze było to, że kiedy wrócili na parter, prawdziwe drzwi jego mieszkania miały już metalową tabliczkę z numerem zero.
     continuity_refs: ["apartment_door", "administrator", "tenant", "stairwell"]
-    control:
+    render:
+      mode: "flux_edit"
       reference_scene: 7
-      strength: 0.52
-      crop: [0.25, 0.10, 0.75, 0.98]
-      canny_low: 0.12
-      canny_high: 0.36
+      preserve_rects:
+        - [0.29, 0.25, 0.45, 0.86]
+        - [0.55, 0.25, 0.71, 0.86]
+        - [0.45, 0.25, 0.55, 0.38]
+        - [0.45, 0.47, 0.55, 0.86]
+      feather: 0.018
+      instruction: >-
+        Transform the environment around the central apartment door into the ground-floor stairwell of an aging
+        1980s Polish apartment block: worn beige terrazzo, dirty cream walls, dark wooden handrail and old frosted glass.
+        Keep the central apartment door in exactly the same position and identity. Add the administrator and tenant
+        standing tensely to either side of it. Add a small brushed-aluminum plate near the upper center of the door
+        in the generated edit; avoid readable typography. Photorealistic final documentary horror frame, no monster.
     prompt: >-
-      Use the control image only to preserve the apartment door identity: silhouette, horizontal groove spacing,
-      peephole and handle position. Place that exact door in a clearly different ground-floor stairwell composition.
-      Administrator and tenant stand motionless before it. A small brushed-aluminum plate is newly attached
-      near the upper center, avoid readable typography, final documentary horror frame, no monster.
+      The same apartment door is now on the ground floor, marked by a metal plate.
     motion: "slow_push"
 
 subtitles:
