@@ -26,10 +26,12 @@ continuity:
       same wall stains and same pipe positions in every basement scene.
     basement_door: >-
       The exact same mysterious basement door in every appearance: narrow dark walnut-brown wooden door,
-      three long vertical recessed panels, matte black steel frame, black metal lever handle on the right,
-      simple keyhole below the handle, small rectangular brushed-aluminum plate centered high on the door,
+      three long vertical recessed panels, matte black steel frame, black metal lever handle on the viewer-facing right side,
+      door hinges on the viewer-facing left side, simple keyhole below the handle,
+      small rectangular brushed-aluminum plate centered high on the door,
       chipped varnish at the lower-left corner and one thin diagonal scratch near the handle.
-      Preserve panel count, wood tone, handle side, frame thickness, plate size and damage marks exactly.
+      Never mirror the door. Preserve panel count, wood tone, handle side, hinge side,
+      frame thickness, plate size and damage marks exactly.
     apartment_door: >-
       The exact same tenant apartment entrance door in every appearance: medium brown laminate door,
       six shallow horizontal grooves, dark brown frame, brushed-steel lever handle on the right,
@@ -67,9 +69,34 @@ scenes:
       W piwnicy starego bloku pojawiły się drzwi, których dzień wcześniej tam nie było.
     continuity_refs: ["basement", "basement_door"]
     prompt: >-
-      MASTER SET. Wide documentary shot of the basement corridor, mysterious basement door at the far end,
-      door fully visible and unobstructed, no people, believable mundane environment, uneasy but subtle, 35mm lens.
-      This frame establishes the immutable basement architecture for later scenes.
+      MASTER SET, high-end photorealistic documentary evidence photograph, vertical 9:16.
+      A narrow neglected basement corridor inside an ordinary aging Polish apartment block from the late communist era.
+      Camera centered at human eye level, straight-on perspective, approximately 35mm full-frame lens,
+      enough floor visible in the foreground to create natural depth. No people and no furniture.
+
+      At the far end stands ONE narrow dark walnut-brown wooden door in a matte black steel frame.
+      The door has EXACTLY THREE long vertical recessed wooden panels, no extra decorative panels and no horizontal grooves.
+      IMPORTANT ORIENTATION: viewed from the camera, the black lever HANDLE AND KEYHOLE ARE ON THE RIGHT SIDE OF THE DOOR.
+      The HINGES ARE ON THE LEFT SIDE OF THE DOOR. Never mirror or reverse this arrangement.
+      A small plain rectangular brushed-aluminum plate is mounted high and centered on the door,
+      with no readable lettering. Chipped varnish is visible near the lower-left edge of the door,
+      plus one subtle diagonal scratch close to the right-side handle.
+
+      On the LEFT side of the corridor is ONE old mustard-yellow gas pipe: it rises vertically from the floor near the left wall,
+      turns through a visible elbow close to the ceiling, then continues horizontally above the door toward the right.
+      Keep this yellow pipe simple and physically plausible, with aged metal clamps and worn paint.
+      A few dull galvanized utility pipes may run along the ceiling, but they must not overwhelm the scene.
+
+      One old cold-white fluorescent tube fixture is mounted to the low concrete ceiling above the door.
+      Illumination is harsh, slightly uneven and mundane, producing realistic dirty shadows rather than cinematic beauty light.
+      The concrete walls are rough, damp, stained and imperfect, with discoloration, old repairs and decades of wear.
+      The bare concrete floor is dusty and irregular with small dark damp marks.
+
+      The image must feel like a real photograph taken in an unpleasant Polish basement,
+      not architectural visualization, not CGI, not a polished horror set.
+      Natural wood grain, real concrete microtexture, subtle lens imperfections, restrained film grain,
+      low-key psychological unease only. No fog, no supernatural glow, no monster, no dramatic colored lighting,
+      no extra doors, no duplicated pipes, no readable text, no logo, no watermark.
     motion: "push_in"
 
   - id: 2
