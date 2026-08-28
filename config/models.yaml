@@ -42,15 +42,27 @@ image_models:
       megapixels: {node: "15", input: "megapixels"}
       save_prefix: {node: "21", input: "filename_prefix"}
 
-  flux2-klein:
-    workflow: "workflows/comfyui/flux2-klein-api.json"
+  flux2-klein-edit:
+    workflow: "workflows/comfyui/flux2-klein-edit-api.json"
     width: 768
     height: 1344
-    steps: 8
-    # Adapter remains optional. It can be enabled later after the Z-Image
-    # reference/control pipeline is validated on the production GPU.
-    models: {}
-    bindings: {}
+    steps: 20
+    cfg: 5.0
+    models:
+      unet: "flux-2-klein-base-4b-fp8.safetensors"
+      clip: "qwen_3_4b.safetensors"
+      vae: "flux2-vae.safetensors"
+    bindings:
+      prompt: {node: "7", input: "text"}
+      seed: {node: "15", input: "noise_seed"}
+      steps: {node: "14", input: "steps"}
+      cfg: {node: "12", input: "cfg"}
+      unet: {node: "1", input: "unet_name"}
+      clip: {node: "2", input: "clip_name"}
+      vae: {node: "3", input: "vae_name"}
+      reference_image: {node: "4", input: "image"}
+      megapixels: {node: "5", input: "megapixels"}
+      save_prefix: {node: "19", input: "filename_prefix"}
 
 tts:
   engine: "chatterbox"
