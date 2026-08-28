@@ -43,6 +43,11 @@ $downloads = @(
         Name = 'Z-Image VAE'
         Url = 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors'
         Target = Join-Path $modelsRoot 'vae\ae.safetensors'
+    },
+    @{
+        Name = 'Z-Image Turbo Fun Union ControlNet'
+        Url = 'https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors'
+        Target = Join-Path $modelsRoot 'model_patches\Z-Image-Turbo-Fun-Controlnet-Union.safetensors'
     }
 )
 
@@ -79,6 +84,6 @@ foreach ($item in $downloads) {
 }
 
 Write-Host ''
-Write-Host 'Z-Image models are ready.'
+Write-Host 'Z-Image models and ControlNet patch are ready.'
 Write-Host ('Models directory: ' + $modelsRoot)
 Write-Host 'Restart ComfyUI if it was running during model installation.'
