@@ -13,7 +13,7 @@ visual_style: >-
   restrained psychological horror, realistic textures, subtle film grain, no gore,
   no supernatural creature visible, no text, no subtitles, no watermark, vertical composition
 continuity:
-  seed_mode: "shared"
+  seed_mode: "per_scene"
   global: >-
     Maintain strict visual continuity between all scenes. Reuse the exact same architecture,
     material palette, object proportions and recurring character appearance whenever referenced.
@@ -71,14 +71,15 @@ scenes:
     continuity_refs: ["basement", "basement_door"]
     control:
       reference_scene: 1
-      strength: 0.96
-      crop: [0.12, 0.04, 0.92, 0.96]
-      canny_low: 0.08
-      canny_high: 0.28
+      strength: 0.62
+      crop: [0.28, 0.08, 0.84, 0.94]
+      canny_low: 0.14
+      canny_high: 0.38
     prompt: >-
-      Closer documentary view of the mysterious basement door squeezed between the yellow gas pipe
-      and rough concrete wall, brushed-aluminum plate clearly visible but avoid readable typography,
-      preserve every visible pipe bend, door edge, handle position and wall stain from the control image
+      A genuinely new closer camera position, not the previous wide composition. Move the camera several meters
+      physically closer so the same mysterious basement door fills about seventy percent of frame height.
+      Keep the recognizable yellow gas pipe, door frame, handle side and major pipe bends from the control image,
+      but allow perspective and framing to change. The brushed-aluminum plate is clearly visible but has no readable typography.
     motion: "slow_push"
 
   - id: 3
@@ -87,14 +88,14 @@ scenes:
     continuity_refs: ["basement", "basement_door", "administrator"]
     control:
       reference_scene: 1
-      strength: 0.86
+      strength: 0.72
       crop: [0.00, 0.00, 1.00, 1.00]
-      canny_low: 0.10
-      canny_high: 0.32
+      canny_low: 0.13
+      canny_high: 0.38
     prompt: >-
-      Preserve the exact corridor geometry and pipes from the control image. Add the administrator at a small
-      basement utility table studying worn architectural floor plans, while the same mysterious door remains visible,
-      serious realistic investigative mood, no readable text on plans
+      Preserve the recognizable corridor layout and major pipes from the control image, but use a new medium camera angle.
+      Add the administrator at a small basement utility table studying worn architectural floor plans,
+      while the same mysterious door remains visible in the background, no readable text on plans.
     motion: "pan_right"
 
   - id: 4
@@ -103,14 +104,14 @@ scenes:
     continuity_refs: ["basement", "basement_door", "tenant"]
     control:
       reference_scene: 1
-      strength: 0.90
+      strength: 0.70
       crop: [0.00, 0.00, 1.00, 1.00]
-      canny_low: 0.10
-      canny_high: 0.32
+      canny_low: 0.13
+      canny_high: 0.38
     prompt: >-
-      Preserve the same corridor, pipes, wall stains, frame and closed door from the control image.
-      Evening lighting, tenant frozen several steps from the door listening cautiously,
-      face partly visible in profile, grounded psychological tension, no monster
+      Same basement and same closed door, but a distinct evening camera setup with the tenant several steps away.
+      Preserve major pipe paths, door silhouette and handle side while allowing perspective to change.
+      Tenant listens cautiously, face partly visible in profile, grounded psychological tension, no monster.
     motion: "push_in"
 
   - id: 5
@@ -119,14 +120,14 @@ scenes:
     continuity_refs: ["basement", "basement_door"]
     control:
       reference_scene: 1
-      strength: 0.94
-      crop: [0.18, 0.22, 0.94, 1.00]
-      canny_low: 0.07
-      canny_high: 0.25
+      strength: 0.68
+      crop: [0.22, 0.36, 0.90, 1.00]
+      canny_low: 0.12
+      canny_high: 0.36
     prompt: >-
-      Evidence-photo closer view based strictly on the control image. Keep the same lower door geometry,
-      frame, gas pipe and floor lines. The brushed-aluminum plate has fallen on the dusty concrete,
-      fresh shallow scratches near the handle but no readable number
+      A new low evidence-photo camera angle close to the floor, not a repeat of scene one.
+      Preserve the same lower door, frame, gas pipe and floor junctions. The small brushed-aluminum plate lies
+      on dusty concrete and fresh shallow scratches appear near the same handle, no readable number.
     motion: "static"
 
   - id: 6
@@ -135,14 +136,14 @@ scenes:
     continuity_refs: ["basement", "basement_door", "administrator"]
     control:
       reference_scene: 1
-      strength: 0.58
+      strength: 0.48
       crop: [0.00, 0.00, 1.00, 1.00]
-      canny_low: 0.10
-      canny_high: 0.32
+      canny_low: 0.14
+      canny_high: 0.40
     prompt: >-
-      Preserve the surrounding basement walls, ceiling pipes, yellow gas pipe and door frame from the control image,
-      but open the same basement door inward without redesigning it. Locksmith and administrator seen from behind
-      at the threshold, revealing a narrow unfinished concrete corridor with one bare tungsten bulb, no creature
+      Preserve the recognizable surrounding basement, yellow gas pipe and door frame, but use a distinct closer angle.
+      Open the same basement door inward without redesigning it. Locksmith and administrator are seen from behind
+      at the threshold, revealing a narrow unfinished concrete corridor with one bare tungsten bulb, no creature.
     motion: "push_in"
 
   - id: 7
@@ -162,15 +163,15 @@ scenes:
     continuity_refs: ["apartment_door", "administrator", "tenant", "stairwell"]
     control:
       reference_scene: 7
-      strength: 0.62
+      strength: 0.52
       crop: [0.25, 0.10, 0.75, 0.98]
-      canny_low: 0.07
-      canny_high: 0.26
+      canny_low: 0.12
+      canny_high: 0.36
     prompt: >-
-      Use the control image to preserve the apartment door silhouette, horizontal groove spacing,
-      peephole and handle position, but place that exact door in the ground-floor stairwell.
+      Use the control image only to preserve the apartment door identity: silhouette, horizontal groove spacing,
+      peephole and handle position. Place that exact door in a clearly different ground-floor stairwell composition.
       Administrator and tenant stand motionless before it. A small brushed-aluminum plate is newly attached
-      near the upper center, avoid readable typography, final documentary horror frame, no monster
+      near the upper center, avoid readable typography, final documentary horror frame, no monster.
     motion: "slow_push"
 
 subtitles:
