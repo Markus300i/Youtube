@@ -11,13 +11,14 @@ function Test-ComfyUI {
     try {
         $response = Invoke-RestMethod -Uri "$($Url.TrimEnd('/'))/system_stats" -TimeoutSec 5
         return $null -ne $response
-    } catch {
+    }
+    catch {
         return $false
     }
 }
 
 if (Test-ComfyUI -Url $ComfyUrl) {
-    Write-Host "ComfyUI już działa: $ComfyUrl"
+    Write-Host ('ComfyUI is already running: ' + $ComfyUrl)
     exit 0
 }
 
@@ -27,8 +28,9 @@ if (-not (Test-Path (Join-Path $appPath 'main.py'))) {
     $nested = Join-Path $path 'ComfyUI'
     if (Test-Path (Join-Path $nested 'main.py')) {
         $appPath = $nested
-    } else {
-        throw "Nie znaleziono main.py w $path ani $nested. Uruchom ComfyUI ręcznie albo ustaw CSP_COMFYUI_PATH."
+    }
+    else {
+        throw ('main.py not found in ' + $path + ' or ' + $nested + '. Start ComfyUI manually or set CSP_COMFYUI_PATH.')
     }
 }
 
@@ -43,7 +45,7 @@ if (-not $python -or -not (Test-Path $python)) {
 }
 
 if (-not $python -or -not (Test-Path $python)) {
-    throw "Nie znaleziono Pythona ComfyUI. Ustaw CSP_COMFY_PYTHON na python.exe środowiska ComfyUI lub uruchom ComfyUI ręcznie."
+    throw 'ComfyUI Python was not found. Set CSP_COMFY_PYTHON to the ComfyUI python.exe or start ComfyUI manually.'
 }
 
 $runtimeRoot = 'C:\CSP'
@@ -66,7 +68,7 @@ $args = @(
     '--async-offload'
 )
 
-Write-Host "Uruchamiam ComfyUI: $python $($args -join ' ')"
+Write-Host ('Starting ComfyUI: ' + $python + ' ' + ($args -join ' '))
 $process = Start-Process `
     -FilePath $python `
     -ArgumentList $args `
@@ -86,13 +88,13 @@ while ((Get-Date) -lt $deadline) {
         if (Test-Path $errLog) {
             $tail = (Get-Content $errLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
         }
-        throw "ComfyUI zakończyło się przed uruchomieniem API. Log:`n$tail"
+        throw ("ComfyUI exited before the API became ready. Log:`n" + $tail)
     }
     if (Test-ComfyUI -Url $ComfyUrl) {
-        Write-Host "ComfyUI READY: $ComfyUrl (PID $($process.Id))"
+        Write-Host ('ComfyUI READY: ' + $ComfyUrl + ' (PID ' + $process.Id + ')')
         exit 0
     }
     Start-Sleep -Seconds 3
 }
 
-throw "Timeout oczekiwania na ComfyUI po $TimeoutSeconds s. Sprawdź $errLog"
+throw ('Timed out waiting for ComfyUI after ' + $TimeoutSeconds + ' seconds. Check ' + $errLog)
