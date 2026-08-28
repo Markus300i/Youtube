@@ -36,9 +36,14 @@ if (-not (Test-Path (Join-Path $appPath 'main.py'))) {
 
 $python = $env:CSP_COMFY_PYTHON
 if (-not $python -or -not (Test-Path $python)) {
+    $appParent = Split-Path $appPath -Parent
+    $pathParent = Split-Path $path -Parent
     $candidates = @(
         (Join-Path $appPath '.venv\Scripts\python.exe'),
-        (Join-Path (Split-Path $appPath -Parent) 'python_embeded\python.exe'),
+        (Join-Path $appParent '.venv\Scripts\python.exe'),
+        (Join-Path $path '.venv\Scripts\python.exe'),
+        (Join-Path $pathParent '.venv\Scripts\python.exe'),
+        (Join-Path $appParent 'python_embeded\python.exe'),
         (Join-Path $path 'python_embeded\python.exe')
     )
     $python = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
