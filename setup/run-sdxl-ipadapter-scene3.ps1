@@ -142,11 +142,26 @@ $shortFile = Join-Path $RepoRoot "shorts\001-drzwi-0.yaml"
 Assert-Exists $testScript "SDXL test script"
 Assert-Exists $shortFile "Drzwi 0 YAML"
 
+$logDir = Join-Path $RepoRoot "logs"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$logFile = Join-Path $logDir "sdxl-ipadapter-scene3.log"
+
 Push-Location $RepoRoot
 try {
-    & $CspPython $testScript $shortFile --reference $Reference
-    if ($LASTEXITCODE -ne 0) {
-        throw "SDXL/IP-Adapter test failed with exit code $LASTEXITCODE"
+    Write-Host "RUN  SDXL/IP-Adapter scene 3 test" -ForegroundColor Cyan
+    $oldErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $pythonOutput = & $CspPython -u $testScript $shortFile --reference $Reference 2>&1
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldErrorAction
+
+    $pythonOutput | Tee-Object -FilePath $logFile
+
+    if ($exitCode -ne 0) {
+        Write-Host ""
+        Write-Host "FAILED - full Python/ComfyUI error is above." -ForegroundColor Red
+        Write-Host "LOG  $logFile" -ForegroundColor Yellow
+        throw "SDXL/IP-Adapter test failed with exit code $exitCode. See $logFile"
     }
 }
 finally {
