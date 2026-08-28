@@ -1,17 +1,16 @@
 param(
-    [string]$ComfyUIPath = "C:\ComfyUI"
+    [string]$ComfyUIPath = 'C:\ComfyUI'
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path $ComfyUIPath)) {
-    throw "Nie znaleziono ComfyUI: $ComfyUIPath"
+    throw ('ComfyUI path not found: ' + $ComfyUIPath)
 }
 
-# Obsługujemy zarówno klasyczne/portable ComfyUI:
-#   <root>\main.py + <root>\models
-# jak i aktualny Comfy Desktop managed install:
-#   <install>\ComfyUI\main.py + <install>\ComfyUI\models
+# Support both layouts:
+#   classic/portable: <root>\main.py + <root>\models
+#   Comfy Desktop managed install: <install>\ComfyUI\main.py + <install>\ComfyUI\models
 $resolvedRoot = [System.IO.Path]::GetFullPath($ComfyUIPath)
 $comfyRoot = $resolvedRoot
 
@@ -19,14 +18,15 @@ if (-not (Test-Path (Join-Path $comfyRoot 'main.py'))) {
     $nested = Join-Path $resolvedRoot 'ComfyUI'
     if (Test-Path (Join-Path $nested 'main.py')) {
         $comfyRoot = $nested
-    } else {
-        throw "Nie znaleziono main.py w $resolvedRoot ani w $nested. Wskaż katalog instalacji ComfyUI/Comfy Desktop."
+    }
+    else {
+        throw ('main.py not found in ' + $resolvedRoot + ' or ' + $nested + '. Point ComfyUIPath to the ComfyUI installation root or its parent directory.')
     }
 }
 
 $modelsRoot = Join-Path $comfyRoot 'models'
-Write-Host "ComfyUI root: $comfyRoot"
-Write-Host "Models root:  $modelsRoot"
+Write-Host ('ComfyUI root: ' + $comfyRoot)
+Write-Host ('Models root:  ' + $modelsRoot)
 
 $downloads = @(
     @{
@@ -53,32 +53,32 @@ foreach ($item in $downloads) {
 
     if ((Test-Path $target) -and ((Get-Item $target).Length -gt 1MB)) {
         $sizeGB = [math]::Round((Get-Item $target).Length / 1GB, 2)
-        Write-Host "SKIP $($item.Name) ($sizeGB GB): $target"
+        Write-Host ('SKIP ' + $item.Name + ' (' + $sizeGB + ' GB): ' + $target)
         continue
     }
 
-    $part = "$target.part"
+    $part = $target + '.part'
     Write-Host ''
-    Write-Host "Pobieram: $($item.Name)"
-    Write-Host "Do:       $target"
+    Write-Host ('Downloading: ' + $item.Name)
+    Write-Host ('Target:      ' + $target)
 
-    # curl -C - wznawia częściowy transfer. Dzięki .part przerwany download
-    # nigdy nie jest traktowany przez ComfyUI jako gotowy model.
+    # curl -C - resumes an interrupted transfer. The .part suffix prevents
+    # ComfyUI from treating an incomplete download as a valid model file.
     & curl.exe -L --fail --retry 5 --retry-delay 5 -C - -o $part $item.Url
     if ($LASTEXITCODE -ne 0) {
-        throw "Błąd pobierania $($item.Name)"
+        throw ('Download failed: ' + $item.Name)
     }
 
     if (-not (Test-Path $part) -or (Get-Item $part).Length -lt 1MB) {
-        throw "Pobrany plik wygląda na nieprawidłowy: $part"
+        throw ('Downloaded file looks invalid: ' + $part)
     }
 
     Move-Item -Force $part $target
     $sizeGB = [math]::Round((Get-Item $target).Length / 1GB, 2)
-    Write-Host "OK $($item.Name): $sizeGB GB"
+    Write-Host ('OK ' + $item.Name + ': ' + $sizeGB + ' GB')
 }
 
 Write-Host ''
-Write-Host 'Modele Z-Image są gotowe.'
-Write-Host "Katalog modeli: $modelsRoot"
-Write-Host 'Uruchom ponownie ComfyUI, jeśli było otwarte podczas instalacji.'
+Write-Host 'Z-Image models are ready.'
+Write-Host ('Models directory: ' + $modelsRoot)
+Write-Host 'Restart ComfyUI if it was running during model installation.'
