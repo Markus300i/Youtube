@@ -42,6 +42,30 @@ image_models:
       megapixels: {node: "15", input: "megapixels"}
       save_prefix: {node: "21", input: "filename_prefix"}
 
+  flux2-klein:
+    workflow: "workflows/comfyui/flux2-klein-t2i-api.json"
+    width: 768
+    height: 1344
+    steps: 20
+    cfg: 5.0
+    models:
+      unet: "flux-2-klein-base-4b-fp8.safetensors"
+      clip: "qwen_3_4b.safetensors"
+      vae: "flux2-vae.safetensors"
+    bindings:
+      prompt: {node: "4", input: "text"}
+      seed: {node: "9", input: "noise_seed"}
+      steps: {node: "8", input: "steps"}
+      cfg: {node: "6", input: "cfg"}
+      width: {node: "10", input: "width"}
+      height: {node: "10", input: "height"}
+      scheduler_width: {node: "8", input: "width"}
+      scheduler_height: {node: "8", input: "height"}
+      unet: {node: "1", input: "unet_name"}
+      clip: {node: "2", input: "clip_name"}
+      vae: {node: "3", input: "vae_name"}
+      save_prefix: {node: "13", input: "filename_prefix"}
+
   flux2-klein-edit:
     workflow: "workflows/comfyui/flux2-klein-edit-api.json"
     width: 768
