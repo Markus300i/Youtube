@@ -22,11 +22,48 @@ from generate_images import (
 
 WORKFLOW = ROOT / "workflows/comfyui/sdxl-ipadapter-controlnet-inpaint-api.json"
 DEFAULT_NEGATIVE = (
-    "table, desk, trolley, cabinet, chair, extra furniture, extra pipes, extra doors, "
-    "additional clutter, cinematic rim light, warm portrait lighting, plastic skin, "
-    "bad hands, extra fingers, deformed anatomy, smooth CGI surfaces, fantasy elements, "
-    "ghosts, glowing eyes, monster, text, labels, watermark, over-stylized lighting"
+    "empty room, empty corridor, no person, table, desk, trolley, cabinet, chair, "
+    "extra furniture, extra pipes, extra doors, additional clutter, cinematic rim light, "
+    "warm portrait lighting, plastic skin, bad hands, extra fingers, deformed anatomy, "
+    "smooth CGI surfaces, fantasy elements, ghosts, glowing eyes, monster, text, labels, "
+    "watermark, over-stylized lighting"
 )
+
+# V2 deliberately gives the administrator much more room than the original edit mask.
+EDIT_RECTS = [[0.48, 0.20, 1.00, 0.98]]
+# Keep the identity-bearing door pixels locked after generation.
+PRESERVE_RECTS = [[0.27, 0.34, 0.66, 0.86]]
+FEATHER = 0.010
+
+VARIANTS = [
+    {
+        "name": "A",
+        "ip": 0.52,
+        "control": 0.12,
+        "control_end": 0.30,
+        "cfg": 6.0,
+        "steps": 28,
+        "seed": 1700321,
+    },
+    {
+        "name": "B",
+        "ip": 0.42,
+        "control": 0.06,
+        "control_end": 0.25,
+        "cfg": 6.3,
+        "steps": 30,
+        "seed": 1700322,
+    },
+    {
+        "name": "C",
+        "ip": 0.32,
+        "control": 0.00,
+        "control_end": 0.20,
+        "cfg": 6.5,
+        "steps": 30,
+        "seed": 1700323,
+    },
+]
 
 
 def scene_by_id(short: dict[str, Any], scene_id: int) -> dict[str, Any]:
@@ -60,8 +97,21 @@ def build_positive(short: dict[str, Any], scene: dict[str, Any]) -> str:
     scene_prompt = str(scene.get("prompt") or "").strip()
     style = str(short.get("visual_style") or "").strip()
     continuity = continuity_prompt(short, scene)
+    admin_emphasis = (
+        "IMPORTANT: one clearly visible elderly Polish building administrator MUST be present "
+        "in the right half of the frame, three-quarter body visible from about knees upward. "
+        "He stands naturally close to the wall without covering the central door, looking down "
+        "at an old worn technical folder and yellowed building plans held in both hands. "
+        "He is about 65, thinning short grey hair, rectangular reading glasses, tired natural face, "
+        "slightly stooped posture, faded dark navy work jacket over a charcoal knitted sweater, "
+        "dark trousers. Ordinary long-time apartment-block administrator, not businessman, police, "
+        "security guard or cinematic hero. The person must be physically integrated into the same "
+        "cold fluorescent basement light and cast believable contact shadows."
+    )
     return ". ".join(
-        part for part in (style, continuity, instruction, scene_prompt) if part
+        part
+        for part in (style, continuity, instruction, scene_prompt, admin_emphasis)
+        if part
     )
 
 
@@ -119,6 +169,29 @@ def validate_nodes(base_url: str) -> None:
         )
 
 
+def make_contact_sheet(files: list[tuple[str, Path]], target: Path) -> None:
+    opened: list[tuple[str, Image.Image]] = []
+    try:
+        for label, path in files:
+            opened.append((label, Image.open(path).convert("RGB")))
+        if not opened:
+            return
+        width = max(img.width for _, img in opened)
+        height = max(img.height for _, img in opened)
+        label_h = 44
+        sheet = Image.new("RGB", (width * len(opened), height + label_h), "black")
+        draw = ImageDraw.Draw(sheet)
+        for index, (label, image) in enumerate(opened):
+            x = index * width
+            sheet.paste(image.resize((width, height), Image.Resampling.LANCZOS), (x, label_h))
+            draw.text((x + 16, 14), label, fill="white")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        sheet.save(target, format="JPEG", quality=92)
+    finally:
+        for _, image in opened:
+            image.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("short_file", nargs="?", default="shorts/001-drzwi-0.yaml")
@@ -128,21 +201,10 @@ def main() -> int:
         "--controlnet",
         default="controlnet-canny-sdxl-1.0-small-fp16.safetensors",
     )
-    parser.add_argument("--ip-weight", type=float, default=0.72)
-    parser.add_argument("--control-strength", type=float, default=0.28)
-    parser.add_argument("--control-end", type=float, default=0.55)
-    parser.add_argument("--steps", type=int, default=24)
-    parser.add_argument("--cfg", type=float, default=5.5)
-    parser.add_argument("--seed", type=int, default=1700320)
     args = parser.parse_args()
 
     short = load_yaml(args.short_file)
     scene = scene_by_id(short, 3)
-    render_cfg = scene.get("render") or {}
-    edit_rects = render_cfg.get("edit_rects") or [[0.64, 0.32, 0.99, 0.96]]
-    if not edit_rects:
-        raise RuntimeError("Scena 3 nie ma edit_rects")
-
     reference = Path(args.reference).expanduser().resolve()
     if not reference.exists():
         raise FileNotFoundError(f"Brak mastera: {reference}")
@@ -155,64 +217,79 @@ def main() -> int:
     wait_for_comfy(base_url)
     validate_nodes(base_url)
 
-    out_dir = short_output_dir(short) / "compare" / "scene-03"
-    work_dir = out_dir / "sdxl-ipadapter-work"
+    out_dir = short_output_dir(short) / "compare" / "scene-03" / "sdxl-v2"
+    work_dir = out_dir / "work"
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    masked_reference = work_dir / "scene-01-inpaint-reference.png"
-    raw_target = work_dir / "sdxl-ipadapter-controlnet-raw.png"
-    final_target = out_dir / "sdxl-ipadapter-controlnet.png"
-
-    width, height = make_inpaint_reference(reference, masked_reference, edit_rects[0])
+    masked_reference = work_dir / "scene-01-inpaint-reference-v2.png"
+    width, height = make_inpaint_reference(reference, masked_reference, EDIT_RECTS[0])
     uploaded = upload_input_image(
         base_url,
         masked_reference,
-        f"csp_{short['id']}_scene03_sdxl_inpaint.png",
+        f"csp_{short['id']}_scene03_sdxl_inpaint_v2.png",
     )
 
-    workflow = json.loads(WORKFLOW.read_text(encoding="utf-8"))
-    workflow["1"]["inputs"]["image"] = uploaded
-    workflow["2"]["inputs"]["ckpt_name"] = args.checkpoint
-    workflow["4"]["inputs"]["weight"] = float(args.ip_weight)
-    workflow["5"]["inputs"]["text"] = build_positive(short, scene)
-    workflow["6"]["inputs"]["text"] = DEFAULT_NEGATIVE
-    workflow["8"]["inputs"]["control_net_name"] = args.controlnet
-    workflow["9"]["inputs"]["strength"] = float(args.control_strength)
-    workflow["9"]["inputs"]["end_percent"] = float(args.control_end)
-    workflow["11"]["inputs"]["seed"] = int(args.seed)
-    workflow["11"]["inputs"]["steps"] = int(args.steps)
-    workflow["11"]["inputs"]["cfg"] = float(args.cfg)
-    workflow["13"]["inputs"]["filename_prefix"] = (
-        f"csp_{short['id']}_scene03_sdxl_ipadapter_controlnet"
-    )
+    template = json.loads(WORKFLOW.read_text(encoding="utf-8"))
+    results: list[tuple[str, Path]] = []
+    positive = build_positive(short, scene)
 
-    print(
-        "SDXL TEST scene 3: "
-        f"{width}x{height}, steps={args.steps}, cfg={args.cfg}, "
-        f"IP={args.ip_weight}, ControlNet={args.control_strength}"
-    )
-    render_workflow(
-        base_url=base_url,
-        comfy=comfy,
-        workflow=copy.deepcopy(workflow),
-        save_node="13",
-        target=raw_target,
-    )
+    print(f"SDXL/IP-ADAPTER V2 scene 3: {width}x{height}")
+    print(f"MASK {EDIT_RECTS[0]}  PRESERVE DOOR {PRESERVE_RECTS[0]}")
 
-    composite_edit(
-        reference,
-        raw_target,
-        final_target,
-        edit_rects,
-        render_cfg.get("preserve_rects"),
-        float(render_cfg.get("feather", 0.014)),
-        width,
-        height,
-    )
+    for variant in VARIANTS:
+        name = str(variant["name"])
+        workflow = copy.deepcopy(template)
+        workflow["1"]["inputs"]["image"] = uploaded
+        workflow["2"]["inputs"]["ckpt_name"] = args.checkpoint
+        workflow["4"]["inputs"]["weight"] = float(variant["ip"])
+        workflow["5"]["inputs"]["text"] = positive
+        workflow["6"]["inputs"]["text"] = DEFAULT_NEGATIVE
+        workflow["8"]["inputs"]["control_net_name"] = args.controlnet
+        workflow["9"]["inputs"]["strength"] = float(variant["control"])
+        workflow["9"]["inputs"]["end_percent"] = float(variant["control_end"])
+        workflow["11"]["inputs"]["seed"] = int(variant["seed"])
+        workflow["11"]["inputs"]["steps"] = int(variant["steps"])
+        workflow["11"]["inputs"]["cfg"] = float(variant["cfg"])
+        workflow["13"]["inputs"]["filename_prefix"] = (
+            f"csp_{short['id']}_scene03_sdxl_v2_{name.lower()}"
+        )
 
-    print(f"RAW   {raw_target}")
-    print(f"FINAL {final_target}")
+        raw_target = work_dir / f"variant-{name}-raw.png"
+        final_target = out_dir / f"variant-{name}.png"
+        print(
+            f"VARIANT {name}: IP={variant['ip']} Control={variant['control']} "
+            f"end={variant['control_end']} CFG={variant['cfg']} "
+            f"steps={variant['steps']} seed={variant['seed']}"
+        )
+
+        render_workflow(
+            base_url=base_url,
+            comfy=comfy,
+            workflow=workflow,
+            save_node="13",
+            target=raw_target,
+        )
+        composite_edit(
+            reference,
+            raw_target,
+            final_target,
+            EDIT_RECTS,
+            PRESERVE_RECTS,
+            FEATHER,
+            width,
+            height,
+        )
+        results.append((f"{name}  IP {variant['ip']}  CN {variant['control']}", final_target))
+        print(f"SAVED {final_target}")
+
+    contact_sheet = out_dir / "comparison-ABC.jpg"
+    make_contact_sheet(results, contact_sheet)
+    print()
+    print("A/B/C READY")
+    for _, path in results:
+        print(path)
+    print(f"COMPARE {contact_sheet}")
     free_comfy_memory(base_url)
     return 0
 
