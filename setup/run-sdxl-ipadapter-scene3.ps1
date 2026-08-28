@@ -148,7 +148,7 @@ $logFile = Join-Path $logDir "sdxl-ipadapter-scene3.log"
 
 Push-Location $RepoRoot
 try {
-    Write-Host "RUN  SDXL/IP-Adapter scene 3 test" -ForegroundColor Cyan
+    Write-Host "RUN  SDXL/IP-Adapter scene 3 A/B/C test" -ForegroundColor Cyan
     $oldErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $pythonOutput = & $CspPython -u $testScript $shortFile --reference $Reference 2>&1
@@ -168,9 +168,9 @@ finally {
     Pop-Location
 }
 
-$result = "C:\CSP\output\001-drzwi-0\compare\scene-03\sdxl-ipadapter-controlnet.png"
+$result = "C:\CSP\output\001-drzwi-0\compare\scene-03\sdxl-v2\comparison-ABC.jpg"
 Write-Host ""
-Write-Host "READY" -ForegroundColor Green
+Write-Host "READY - A/B/C comparison" -ForegroundColor Green
 Write-Host $result
 if (Test-Path $result) {
     Start-Process $result
