@@ -60,7 +60,7 @@ class AssetManager:
         if scene is None:
             raise KeyError(f"Unknown scene {project_id}:{scene_id}")
 
-        path_str = str(Path(path))
+        path_str = str(Path(path).expanduser().resolve())
         row = self.store.conn.execute(
             """
             SELECT COALESCE(MAX(revision), 0) AS max_revision
