@@ -2,6 +2,7 @@
 
 from .asset_manager import AssetManager
 from .models import Asset, Project, Scene, SceneRevision, ShotPlan
+from .scene_ops import SceneOperations
 from .shot_director import ShotAudit, ShotDirector
 from .store import StudioStore
 
@@ -10,6 +11,7 @@ __all__ = [
     "AssetManager",
     "Project",
     "Scene",
+    "SceneOperations",
     "SceneRevision",
     "ShotPlan",
     "ShotDirector",
