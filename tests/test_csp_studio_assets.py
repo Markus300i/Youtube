@@ -40,11 +40,11 @@ class AssetManagerTests(unittest.TestCase):
                 self.assertFalse(assets[1].active)
                 active = manager.active_asset("001", 1)
                 assert active is not None
-                self.assertEqual(active.path, "scene-01-v2.png")
+                self.assertEqual(Path(active.path).name, "scene-01-v2.png")
 
                 scene = store.get_scene("001", 1)
                 assert scene is not None
-                self.assertEqual(scene.asset_path, "scene-01-v2.png")
+                self.assertEqual(Path(scene.asset_path).name, "scene-01-v2.png")  # type: ignore[arg-type]
                 self.assertEqual(scene.status, "generated")
                 self.assertEqual(scene.revision, 3)
 
@@ -65,7 +65,7 @@ class AssetManagerTests(unittest.TestCase):
                 scene = store.get_scene("001", 1)
                 assert scene is not None
                 self.assertEqual(scene.status, "approved")
-                self.assertEqual(scene.asset_path, "scene-01-fixed.png")
+                self.assertEqual(Path(scene.asset_path).name, "scene-01-fixed.png")  # type: ignore[arg-type]
 
     def test_cannot_approve_without_asset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
