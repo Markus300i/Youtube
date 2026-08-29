@@ -18,7 +18,7 @@ def main() -> None:
 
     output_root = Path(os.getenv("CSP_OUTPUT_DIR", "output")).expanduser()
     db_path = Path(args.db) if args.db else output_root / "csp-studio.db"
-    images_dir = Path(args.images_dir).expanduser()
+    images_dir = Path(args.images_dir).expanduser().resolve()
 
     if not images_dir.exists():
         raise FileNotFoundError(images_dir)
@@ -32,14 +32,14 @@ def main() -> None:
             raise RuntimeError(f"Project has no scenes in Studio DB: {args.project_id}")
 
         for scene in scenes:
-            path = images_dir / f"scene-{scene.scene_id:02d}.png"
+            path = (images_dir / f"scene-{scene.scene_id:02d}.png").resolve()
             if not path.exists():
                 print(f"MISSING scene {scene.scene_id:02d}: {path}")
                 skipped += 1
                 continue
 
             active = manager.active_asset(args.project_id, scene.scene_id, "image")
-            if active and Path(active.path) == path:
+            if active and Path(active.path).resolve() == path:
                 print(f"SKIP scene {scene.scene_id:02d}: already active")
                 skipped += 1
                 continue
