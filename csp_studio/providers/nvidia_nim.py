@@ -12,6 +12,7 @@ from .base import ProviderError, ProviderResponse
 
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_CHAT_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+DEFAULT_VISION_MODEL = "meta/muse-glimmer-30b"
 DEFAULT_EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
 
 
@@ -32,7 +33,7 @@ class NvidiaNimProvider:
         self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
         self.base_url = (base_url or os.getenv("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.chat_model = chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL
-        self.vision_model = vision_model or os.getenv("CSP_NIM_VISION_MODEL") or self.chat_model
+        self.vision_model = vision_model or os.getenv("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL
         self.embed_model = embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
