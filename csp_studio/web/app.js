@@ -1,4 +1,4 @@
-const state = { projects: [], projectId: null, scenes: [], selectedId: null };
+const state = { projects: [], projectId: null, scenes: [], selectedId: null, audit: null };
 
 const $ = (id) => document.getElementById(id);
 const projectSelect = $("projectSelect");
@@ -8,6 +8,12 @@ const projectMeta = $("projectMeta");
 const toastEl = $("toast");
 const historyDialog = $("historyDialog");
 const historyContent = $("historyContent");
+
+const SHOT_TYPES = ["wide", "medium", "close_up", "detail", "pov", "over_shoulder", "reveal", "twist"];
+const CAMERA_TYPES = ["static", "slow_push", "slow_pull", "push_in", "pan_left", "pan_right", "micro_handheld"];
+const PURPOSE_TYPES = ["story", "establish", "evidence", "character", "tension", "reveal", "orientation_reset", "twist"];
+const MOTION_TYPES = ["static", "slow_push", "slow_pull", "push_in", "pan_left", "pan_right", "micro_handheld"];
+const MOTION_INTENSITIES = ["none", "low", "medium", "high"];
 
 function toast(message) {
   toastEl.textContent = message;
@@ -37,6 +43,10 @@ function statusLabel(status) {
   return map[status] || status;
 }
 
+function selectOptions(values, current) {
+  return values.map(value => `<option value="${value}" ${value === current ? "selected" : ""}>${value}</option>`).join("");
+}
+
 async function loadProjects() {
   state.projects = await api("/api/projects");
   projectSelect.innerHTML = state.projects.map(p => `<option value="${p.project_id}">${p.project_id} — ${p.title}</option>`).join("");
@@ -52,9 +62,14 @@ async function loadProjects() {
 }
 
 async function loadScenes({ keepSelection = true } = {}) {
-  state.scenes = await api(`/api/projects/${state.projectId}/scenes`);
+  const [scenes, audit] = await Promise.all([
+    api(`/api/projects/${state.projectId}/scenes`),
+    api(`/api/projects/${state.projectId}/shot-audit`),
+  ]);
+  state.scenes = scenes;
+  state.audit = audit;
   const project = state.projects.find(p => p.project_id === state.projectId);
-  projectMeta.textContent = `${project?.title || state.projectId} · ${state.scenes.length} scen`;
+  projectMeta.textContent = `${project?.title || state.projectId} · ${state.scenes.length} scen · Shot QA ${audit.score}/100`;
 
   if (!keepSelection || !state.scenes.some(s => s.scene_id === state.selectedId)) {
     state.selectedId = state.scenes[0]?.scene_id ?? null;
@@ -99,6 +114,8 @@ function renderSelected() {
   }
   scenePanel.className = "scene-panel";
   const asset = scene.active_asset;
+  const audit = state.audit || { score: 0, warnings: [] };
+  const warnings = audit.warnings || [];
   scenePanel.innerHTML = `
     <img class="panel-preview" src="${scene.image_url}" alt="Scena ${scene.scene_id}" />
     <div class="panel-head">
@@ -114,19 +131,54 @@ function renderSelected() {
       <p>${escapeHtml(scene.text)}</p>
     </div>
 
+    <div class="detail-block editor-block">
+      <div class="editor-heading">
+        <h3>Prompt sceny</h3>
+        <span class="revision-pill">Scene r${scene.scene_revision}</span>
+      </div>
+      <textarea id="promptInput" class="prompt-input" rows="9">${escapeHtml(scene.prompt || "")}</textarea>
+    </div>
+
     <div class="detail-block">
       <h3>Shot Director</h3>
-      <div class="meta-grid">
-        <div class="meta-item"><span>Shot</span>${escapeHtml(scene.shot?.shot_type || "—")}</div>
-        <div class="meta-item"><span>Camera</span>${escapeHtml(scene.shot?.camera || scene.motion || "—")}</div>
-        <div class="meta-item"><span>Scene rev.</span>r${scene.scene_revision}</div>
-        <div class="meta-item"><span>Image rev.</span>${asset ? `r${asset.revision}` : "—"}</div>
+      <div class="editor-grid">
+        <label>Shot type
+          <select id="shotTypeInput">${selectOptions(SHOT_TYPES, scene.shot?.shot_type || "medium")}</select>
+        </label>
+        <label>Camera
+          <select id="cameraInput">${selectOptions(CAMERA_TYPES, scene.shot?.camera || "static")}</select>
+        </label>
+        <label>Purpose
+          <select id="purposeInput">${selectOptions(PURPOSE_TYPES, scene.shot?.purpose || "story")}</select>
+        </label>
+        <label>Motion
+          <select id="motionInput">${selectOptions(MOTION_TYPES, scene.motion || "static")}</select>
+        </label>
+        <label>Motion intensity
+          <select id="motionIntensityInput">${selectOptions(MOTION_INTENSITIES, scene.shot?.motion_intensity || "low")}</select>
+        </label>
+        <label>Visual anchor
+          <input id="visualAnchorInput" type="text" value="${escapeHtml(scene.shot?.visual_anchor || scene.continuity_refs?.[0] || "")}" />
+        </label>
       </div>
+      <button id="saveSceneBtn" class="primary save-scene">Zapisz scenę</button>
+    </div>
+
+    <div class="detail-block qa-block ${audit.ok ? "qa-ok" : "qa-warn"}">
+      <div class="qa-head">
+        <h3>Shot QA</h3>
+        <strong>${audit.score}/100</strong>
+      </div>
+      ${warnings.length ? `<details><summary>${warnings.length} ostrzeżeń</summary><ul>${warnings.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details>` : `<p class="muted">Brak ostrzeżeń Shot Directora.</p>`}
     </div>
 
     <div class="detail-block">
       <h3>Aktywny asset</h3>
-      <p class="muted">${asset ? `${escapeHtml(asset.source)} · ${escapeHtml(asset.path)}` : "Brak aktywnego obrazu"}</p>
+      <div class="meta-grid">
+        <div class="meta-item"><span>Image rev.</span>${asset ? `r${asset.revision}` : "—"}</div>
+        <div class="meta-item"><span>Source</span>${asset ? escapeHtml(asset.source) : "—"}</div>
+      </div>
+      <p class="muted asset-path">${asset ? escapeHtml(asset.path) : "Brak aktywnego obrazu"}</p>
     </div>
 
     <div class="actions">
@@ -139,10 +191,39 @@ function renderSelected() {
     </div>
   `;
 
+  $("saveSceneBtn").addEventListener("click", saveSelectedScene);
   $("replaceFile").addEventListener("change", replaceSelected);
   $("approveBtn").addEventListener("click", () => mutateSelected("approve"));
   $("regenBtn").addEventListener("click", () => mutateSelected("regenerate"));
   $("historyBtn").addEventListener("click", showHistory);
+}
+
+async function saveSelectedScene() {
+  const scene = selectedScene();
+  if (!scene) return;
+  const payload = {
+    prompt: $("promptInput").value,
+    motion: $("motionInput").value,
+    shot: {
+      shot_type: $("shotTypeInput").value,
+      camera: $("cameraInput").value,
+      purpose: $("purposeInput").value,
+      visual_anchor: $("visualAnchorInput").value || null,
+      motion_intensity: $("motionIntensityInput").value,
+    },
+    note: "Scene plan edited in CSP Studio GUI",
+  };
+  try {
+    const result = await api(`/api/projects/${state.projectId}/scenes/${scene.scene_id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    await loadScenes();
+    toast(result.changed ? `Scena ${scene.scene_id}: zapisano nową rewizję` : "Brak zmian do zapisania");
+  } catch (err) {
+    alert(`Nie udało się zapisać sceny: ${err.message}`);
+  }
 }
 
 async function replaceSelected(event) {
@@ -189,7 +270,7 @@ async function showHistory() {
         <div class="muted">${escapeHtml(a.source)} · ${escapeHtml(a.status)}</div>
         <code>${escapeHtml(a.path)}</code>
       </div>`).join("") : `<div class="empty-state">Brak assetów.</div>`;
-    const revisionHtml = data.scene_revisions.length ? data.scene_revisions.slice(0, 12).map(r => `
+    const revisionHtml = data.scene_revisions.length ? data.scene_revisions.slice(0, 16).map(r => `
       <div class="history-entry">
         <strong>Scene r${r.revision} · ${escapeHtml(r.action)}</strong>
         <div class="muted">${escapeHtml(r.note || "")}</div>
