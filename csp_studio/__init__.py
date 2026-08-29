@@ -9,6 +9,7 @@ from .scene_ops import SceneOperations
 from .shot_director import ShotAudit, ShotDirector
 from .store import StudioStore
 from .task_engine import StudioTask, TaskEngine
+from .universe_memory import MemoryItem, MemoryMatch, UniverseMemory
 from .visual_qa import VisualQA, VisualQAReport, VisualSceneNote
 
 __all__ = [
@@ -27,6 +28,9 @@ __all__ = [
     "StudioStore",
     "StudioTask",
     "TaskEngine",
+    "MemoryItem",
+    "MemoryMatch",
+    "UniverseMemory",
     "VisualQA",
     "VisualQAReport",
     "VisualSceneNote",
