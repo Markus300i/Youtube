@@ -22,6 +22,24 @@ class ShotPlan:
 
 
 @dataclass(slots=True)
+class Asset:
+    asset_id: int | None
+    project_id: str
+    scene_id: int
+    kind: str
+    path: str
+    status: str = "candidate"
+    revision: int = 1
+    active: bool = False
+    source: str = "manual"
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class Scene:
     project_id: str
     scene_id: int
