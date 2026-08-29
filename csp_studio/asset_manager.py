@@ -44,6 +44,16 @@ class AssetManager:
         self.store.conn.executescript(ASSET_SCHEMA)
         self.store.conn.commit()
 
+    def next_revision(self, project_id: str, scene_id: int, kind: str = "image") -> int:
+        row = self.store.conn.execute(
+            """
+            SELECT COALESCE(MAX(revision), 0) AS max_revision
+            FROM assets WHERE project_id=? AND scene_id=? AND kind=?
+            """,
+            (project_id, scene_id, kind),
+        ).fetchone()
+        return int(row["max_revision"]) + 1
+
     def register_asset(
         self,
         project_id: str,
@@ -61,14 +71,7 @@ class AssetManager:
             raise KeyError(f"Unknown scene {project_id}:{scene_id}")
 
         path_str = str(Path(path).expanduser().resolve())
-        row = self.store.conn.execute(
-            """
-            SELECT COALESCE(MAX(revision), 0) AS max_revision
-            FROM assets WHERE project_id=? AND scene_id=? AND kind=?
-            """,
-            (project_id, scene_id, kind),
-        ).fetchone()
-        revision = int(row["max_revision"]) + 1
+        revision = self.next_revision(project_id, scene_id, kind)
 
         if activate:
             self.store.conn.execute(
@@ -122,6 +125,35 @@ class AssetManager:
             metadata=metadata or {},
             created_at=now,
         )
+
+    def relocate_asset(
+        self,
+        asset_id: int,
+        new_path: str | Path,
+        *,
+        metadata_update: dict[str, Any] | None = None,
+    ) -> Asset:
+        row = self.store.conn.execute(
+            "SELECT * FROM assets WHERE asset_id=?",
+            (asset_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown asset: {asset_id}")
+
+        metadata = json.loads(row["metadata_json"] or "{}")
+        if metadata_update:
+            metadata.update(metadata_update)
+        path_str = str(Path(new_path).expanduser().resolve())
+        self.store.conn.execute(
+            "UPDATE assets SET path=?, metadata_json=? WHERE asset_id=?",
+            (path_str, json.dumps(metadata, ensure_ascii=False), asset_id),
+        )
+        self.store.conn.commit()
+        updated = self.store.conn.execute(
+            "SELECT * FROM assets WHERE asset_id=?",
+            (asset_id,),
+        ).fetchone()
+        return self._row_to_asset(updated)
 
     def active_asset(self, project_id: str, scene_id: int, kind: str = "image") -> Asset | None:
         row = self.store.conn.execute(
