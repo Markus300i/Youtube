@@ -1,5 +1,7 @@
 # CSP Automation v1 — architektura
 
+> Decyzje dotyczące wykorzystania zewnętrznych projektów są utrzymywane w [CSP_DONOR_MAP.md](CSP_DONOR_MAP.md). Przed budową dużego nowego modułu należy najpierw sprawdzić tę mapę.
+
 ```text
 GitHub workflow_dispatch
         |
