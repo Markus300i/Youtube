@@ -40,8 +40,9 @@ class ShotDirectorTests(unittest.TestCase):
 
 
 class StudioStoreTests(unittest.TestCase):
-    def test_scene_update_creates_revision(self) -> None:
-        payload = {
+    @staticmethod
+    def payload() -> dict:
+        return {
             "id": "001",
             "title": "Drzwi 0",
             "series": "Nie Otwieraj",
@@ -59,7 +60,9 @@ class StudioStoreTests(unittest.TestCase):
                 }
             ],
         }
-        project = project_from_short(payload, "shorts/001-drzwi-0.yaml")
+
+    def test_scene_update_creates_revision(self) -> None:
+        project = project_from_short(self.payload(), "shorts/001-drzwi-0.yaml")
 
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "studio.db"
@@ -82,6 +85,27 @@ class StudioStoreTests(unittest.TestCase):
                 self.assertEqual(revisions[0]["action"], "edit_prompt")
                 self.assertEqual(revisions[0]["before"]["prompt"], "Basement")
                 self.assertEqual(revisions[0]["after"]["prompt"], "Updated prompt")
+
+    def test_reimport_does_not_rewind_scene_revision(self) -> None:
+        payload = self.payload()
+        project = project_from_short(payload, "shorts/001-drzwi-0.yaml")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(project)
+                scene = store.get_scene("001", 1)
+                assert scene is not None
+                scene.prompt = "Studio revision"
+                store.upsert_scene(scene, action="edit_prompt")
+                self.assertEqual(store.get_scene("001", 1).revision, 2)  # type: ignore[union-attr]
+
+                # Legacy YAML still contains the original prompt/revision-less state.
+                reimported = project_from_short(payload, "shorts/001-drzwi-0.yaml")
+                store.upsert_project(reimported)
+                after = store.get_scene("001", 1)
+                assert after is not None
+                self.assertEqual(after.revision, 2)
 
     def test_legacy_yaml_fields_survive_import(self) -> None:
         payload = {
