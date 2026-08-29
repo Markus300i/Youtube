@@ -122,10 +122,15 @@ class StudioStore:
     ) -> None:
         before = self.get_scene(scene.project_id, scene.scene_id)
         now = utc_now()
-        if before and record_revision:
-            scene.revision = before.revision + 1
+        if before:
             scene.created_at = before.created_at
             scene.updated_at = now
+            if record_revision:
+                scene.revision = before.revision + 1
+            else:
+                # Re-importing a legacy YAML must never rewind Studio history.
+                # YAML is a compatibility/source input; SQLite owns revisions.
+                scene.revision = before.revision
 
         self.conn.execute(
             """
@@ -141,7 +146,7 @@ class StudioStore:
                 motion=excluded.motion,
                 shot_json=excluded.shot_json,
                 status=excluded.status,
-                asset_path=excluded.asset_path,
+                asset_path=COALESCE(excluded.asset_path, scenes.asset_path),
                 revision=excluded.revision,
                 updated_at=excluded.updated_at
             """,
@@ -190,6 +195,7 @@ class StudioStore:
         if row is None:
             return None
         shot_data = json.loads(row["shot_json"] or "{}")
+        allowed_shot_fields = ShotPlan.__dataclass_fields__
         return Scene(
             project_id=row["project_id"],
             scene_id=int(row["scene_id"]),
@@ -198,7 +204,7 @@ class StudioStore:
             continuity_refs=json.loads(row["continuity_refs_json"] or "[]"),
             render=json.loads(row["render_json"] or "{}"),
             motion=row["motion"],
-            shot=ShotPlan(**{k: v for k, v in shot_data.items() if k in ShotPlan.__dataclass_fields__}),
+            shot=ShotPlan(**{k: v for k, v in shot_data.items() if k in allowed_shot_fields}),
             status=row["status"],
             asset_path=row["asset_path"],
             revision=int(row["revision"]),
