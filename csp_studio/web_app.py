@@ -9,9 +9,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .asset_manager import AssetManager, VALID_SCENE_STATUSES
+from .models import ShotPlan
 from .scene_ops import SUPPORTED_IMAGE_EXTENSIONS, SceneOperations
+from .shot_director import ShotDirector
 from .store import StudioStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +23,62 @@ OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 INCOMING_DIR = OUTPUT_ROOT / ".studio-incoming"
 
-app = FastAPI(title="CSP Studio", version="0.1.0")
+SHOT_TYPES = {
+    "wide",
+    "medium",
+    "close_up",
+    "detail",
+    "pov",
+    "over_shoulder",
+    "reveal",
+    "twist",
+}
+CAMERA_TYPES = {
+    "static",
+    "slow_push",
+    "slow_pull",
+    "push_in",
+    "pan_left",
+    "pan_right",
+    "micro_handheld",
+}
+PURPOSE_TYPES = {
+    "story",
+    "establish",
+    "evidence",
+    "character",
+    "tension",
+    "reveal",
+    "orientation_reset",
+    "twist",
+}
+MOTION_INTENSITIES = {"none", "low", "medium", "high"}
+MOTION_TYPES = {
+    "static",
+    "slow_push",
+    "slow_pull",
+    "push_in",
+    "pan_left",
+    "pan_right",
+    "micro_handheld",
+}
+
+app = FastAPI(title="CSP Studio", version="0.2.0")
+
+
+class ShotPlanUpdate(BaseModel):
+    shot_type: str
+    camera: str
+    purpose: str
+    visual_anchor: str | None = None
+    motion_intensity: str = "low"
+
+
+class SceneEditorUpdate(BaseModel):
+    prompt: str
+    motion: str
+    shot: ShotPlanUpdate
+    note: str = "Edited in CSP Studio GUI"
 
 
 def slugify(value: str) -> str:
@@ -64,6 +122,27 @@ def _scene_payload(store: StudioStore, project_id: str, scene_id: int) -> dict:
     }
 
 
+def _shot_audit_payload(store: StudioStore, project_id: str) -> dict:
+    _project_row(store, project_id)
+    audit = ShotDirector().audit(store.list_scenes(project_id))
+    return {"score": audit.score, "ok": audit.ok, "warnings": audit.warnings}
+
+
+def _validate_editor_update(payload: SceneEditorUpdate) -> None:
+    if not payload.prompt.strip():
+        raise HTTPException(400, "Prompt cannot be empty")
+    choices = (
+        (payload.shot.shot_type, SHOT_TYPES, "shot_type"),
+        (payload.shot.camera, CAMERA_TYPES, "camera"),
+        (payload.shot.purpose, PURPOSE_TYPES, "purpose"),
+        (payload.shot.motion_intensity, MOTION_INTENSITIES, "motion_intensity"),
+        (payload.motion, MOTION_TYPES, "motion"),
+    )
+    for value, allowed, field in choices:
+        if value not in allowed:
+            raise HTTPException(400, f"Unsupported {field}: {value}")
+
+
 @app.get("/")
 def index():
     return FileResponse(WEB_DIR / "index.html", media_type="text/html")
@@ -100,10 +179,57 @@ def scenes(project_id: str):
         return [_scene_payload(store, project_id, scene.scene_id) for scene in store.list_scenes(project_id)]
 
 
+@app.get("/api/projects/{project_id}/shot-audit")
+def shot_audit(project_id: str):
+    with StudioStore(DB_PATH) as store:
+        return _shot_audit_payload(store, project_id)
+
+
 @app.get("/api/projects/{project_id}/scenes/{scene_id}")
 def scene(project_id: str, scene_id: int):
     with StudioStore(DB_PATH) as store:
         return _scene_payload(store, project_id, scene_id)
+
+
+@app.put("/api/projects/{project_id}/scenes/{scene_id}")
+def update_scene(project_id: str, scene_id: int, payload: SceneEditorUpdate):
+    _validate_editor_update(payload)
+    with StudioStore(DB_PATH) as store:
+        scene = store.get_scene(project_id, scene_id)
+        if scene is None:
+            raise HTTPException(404, f"Unknown scene: {project_id}:{scene_id}")
+
+        anchor = payload.shot.visual_anchor.strip() if payload.shot.visual_anchor else None
+        new_shot = ShotPlan(
+            shot_type=payload.shot.shot_type,
+            camera=payload.shot.camera,
+            purpose=payload.shot.purpose,
+            visual_anchor=anchor or None,
+            motion_intensity=payload.shot.motion_intensity,
+        )
+        changed = any(
+            [
+                scene.prompt != payload.prompt.strip(),
+                scene.motion != payload.motion,
+                scene.shot.to_dict() != new_shot.to_dict(),
+            ]
+        )
+
+        if changed:
+            scene.prompt = payload.prompt.strip()
+            scene.motion = payload.motion
+            scene.shot = new_shot
+            store.upsert_scene(
+                scene,
+                action="edit_scene_plan",
+                note=payload.note.strip() or "Edited in CSP Studio GUI",
+            )
+
+        return {
+            "changed": changed,
+            "scene": _scene_payload(store, project_id, scene_id),
+            "audit": _shot_audit_payload(store, project_id),
+        }
 
 
 @app.get("/api/projects/{project_id}/scenes/{scene_id}/image")
