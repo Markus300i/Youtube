@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSP Studio</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">CIEMNA STRONA POLSKI</div>
+      <h1>CSP Studio</h1>
+    </div>
+    <div class="top-actions">
+      <select id="projectSelect"></select>
+      <button id="refreshBtn" class="ghost">Odśwież</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="scene-browser">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">PROJECT SCENES</div>
+          <h2>Sceny</h2>
+        </div>
+        <div id="projectMeta" class="muted"></div>
+      </div>
+      <div id="sceneGrid" class="scene-grid"></div>
+    </section>
+
+    <aside id="scenePanel" class="scene-panel empty">
+      <div class="empty-state">Wybierz scenę.</div>
+    </aside>
+  </main>
+
+  <dialog id="historyDialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow">SCENE HISTORY</div>
+        <h2 id="historyTitle">Historia</h2>
+      </div>
+      <button id="closeHistory" class="ghost">Zamknij</button>
+    </div>
+    <div id="historyContent"></div>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
