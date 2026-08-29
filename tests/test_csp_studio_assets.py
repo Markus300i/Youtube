@@ -34,9 +34,13 @@ class AssetManagerTests(unittest.TestCase):
 
                 self.assertEqual(first.revision, 1)
                 self.assertEqual(second.revision, 2)
-                self.assertFalse(manager.list_assets("001", 1)[1].active)
-                self.assertTrue(manager.active_asset("001", 1).active)  # type: ignore[union-attr]
-                self.assertEqual(manager.active_asset("001", 1).path, "scene-01-v2.png")  # type: ignore[union-attr]
+                assets = manager.list_assets("001", 1)
+                self.assertEqual(len(assets), 2)
+                self.assertTrue(assets[0].active)
+                self.assertFalse(assets[1].active)
+                active = manager.active_asset("001", 1)
+                assert active is not None
+                self.assertEqual(active.path, "scene-01-v2.png")
 
                 scene = store.get_scene("001", 1)
                 assert scene is not None
