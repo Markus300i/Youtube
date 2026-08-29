@@ -12,6 +12,8 @@ from typing import Any
 from .models import utc_now
 from .store import StudioStore
 
+ROOT = Path(__file__).resolve().parents[1]
+
 TASK_SCHEMA = """
 CREATE TABLE IF NOT EXISTS studio_tasks (
     task_id TEXT PRIMARY KEY,
@@ -179,7 +181,6 @@ class TaskEngine:
                     (resource,),
                 ).fetchone()
             else:
-                # If a GPU task is already running, skip queued GPU work but allow CPU/IO/network work.
                 running_gpu = conn.execute(
                     "SELECT 1 FROM studio_tasks WHERE state='running' AND resource='gpu' LIMIT 1"
                 ).fetchone()
@@ -407,7 +408,12 @@ def main() -> None:
     submit_cmd.add_argument("--resource", choices=sorted(VALID_RESOURCES), default="cpu")
 
     args = parser.parse_args()
-    db_path = Path(args.db).expanduser().resolve() if args.db else Path(os.getenv("CSP_OUTPUT_DIR", ROOT / "output")) / "csp-studio.db"
+    if args.db:
+        db_path = Path(args.db).expanduser().resolve()
+    else:
+        output_root = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser().resolve()
+        db_path = output_root / "csp-studio.db"
+
     with StudioStore(db_path) as store:
         engine = TaskEngine(store)
         if args.command == "list":
