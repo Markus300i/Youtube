@@ -60,6 +60,11 @@ def flow_js():
     return FileResponse(WEB_DIR / "flow.js", media_type="application/javascript")
 
 
+@router.get("/flow-v2.js")
+def flow_v2_js():
+    return FileResponse(WEB_DIR / "flow_v2.js", media_type="application/javascript")
+
+
 @router.get("/api/workers")
 def worker_status():
     with StudioStore(DB_PATH) as store:
