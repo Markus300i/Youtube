@@ -1,4 +1,12 @@
-const state = { projects: [], projectId: null, scenes: [], selectedId: null, audit: null };
+const state = {
+  projects: [],
+  projectId: null,
+  scenes: [],
+  selectedId: null,
+  audit: null,
+  ops: null,
+  view: "dashboard",
+};
 
 const $ = (id) => document.getElementById(id);
 const projectSelect = $("projectSelect");
@@ -8,6 +16,8 @@ const projectMeta = $("projectMeta");
 const toastEl = $("toast");
 const historyDialog = $("historyDialog");
 const historyContent = $("historyContent");
+const opsDashboard = $("opsDashboard");
+const taskPanel = $("taskPanel");
 
 const SHOT_TYPES = ["wide", "medium", "close_up", "detail", "pov", "over_shoulder", "reveal", "twist"];
 const CAMERA_TYPES = ["static", "slow_push", "slow_pull", "push_in", "pan_left", "pan_right", "micro_handheld"];
@@ -32,6 +42,10 @@ async function api(url, options = {}) {
   return type.includes("application/json") ? res.json() : res;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
+}
+
 function statusLabel(status) {
   const map = {
     draft: "Draft",
@@ -47,35 +61,167 @@ function selectOptions(values, current) {
   return values.map(value => `<option value="${value}" ${value === current ? "selected" : ""}>${value}</option>`).join("");
 }
 
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll(".view").forEach(el => el.classList.add("hidden"));
+  $(`${view}View`).classList.remove("hidden");
+  document.querySelectorAll(".view-tab").forEach(btn => btn.classList.toggle("active", btn.dataset.view === view));
+}
+
 async function loadProjects() {
   state.projects = await api("/api/projects");
-  projectSelect.innerHTML = state.projects.map(p => `<option value="${p.project_id}">${p.project_id} — ${p.title}</option>`).join("");
+  projectSelect.innerHTML = state.projects.map(p => `<option value="${p.project_id}">${p.project_id} — ${escapeHtml(p.title)}</option>`).join("");
   if (!state.projects.length) {
-    sceneGrid.innerHTML = `<div class="empty-state">Brak projektów w csp-studio.db.</div>`;
+    opsDashboard.innerHTML = `<div class="empty-state">Brak projektów w csp-studio.db.</div>`;
     return;
   }
   if (!state.projectId || !state.projects.some(p => p.project_id === state.projectId)) {
     state.projectId = state.projects[0].project_id;
   }
   projectSelect.value = state.projectId;
-  await loadScenes();
+  await loadProjectData();
 }
 
-async function loadScenes({ keepSelection = true } = {}) {
-  const [scenes, audit] = await Promise.all([
+async function loadProjectData({ keepSelection = true } = {}) {
+  const [scenes, audit, ops] = await Promise.all([
     api(`/api/projects/${state.projectId}/scenes`),
     api(`/api/projects/${state.projectId}/shot-audit`),
+    api(`/api/projects/${state.projectId}/ops-dashboard`),
   ]);
   state.scenes = scenes;
   state.audit = audit;
+  state.ops = ops;
   const project = state.projects.find(p => p.project_id === state.projectId);
-  projectMeta.textContent = `${project?.title || state.projectId} · ${state.scenes.length} scen · Shot QA ${audit.score}/100`;
+  const review = ops.review || { approved: 0, total: scenes.length };
+  projectMeta.textContent = `${project?.title || state.projectId} · Review ${review.approved}/${review.total} · Shot QA ${audit.score}/100`;
 
   if (!keepSelection || !state.scenes.some(s => s.scene_id === state.selectedId)) {
     state.selectedId = state.scenes[0]?.scene_id ?? null;
   }
+  renderDashboard();
+  renderTasks();
   renderSceneGrid();
   renderSelected();
+}
+
+function readinessClass(check) {
+  if (check.ok) return "ok";
+  return check.blocking ? "block" : "warn";
+}
+
+function renderDashboard() {
+  const ops = state.ops;
+  if (!ops) return;
+  const agent = ops.agent;
+  const review = ops.review;
+  const vqa = ops.visual_qa || {};
+  const memory = ops.memory || {};
+  const checks = agent.checks || [];
+  const blocking = (agent.blockers || []).length;
+  const nextButtonLabel = agent.next_action === "review_scenes" ? "Przejdź do review" : "Uruchom następny krok";
+  const visualScore = vqa.available ? `${vqa.score}/100` : "—";
+  const memoryText = memory.comparison_available
+    ? `${memory.previous_project_ids.length} wcześniejszych projektów w pamięci`
+    : "Brak wcześniejszych projektów do porównania";
+
+  opsDashboard.innerHTML = `
+    <div class="dashboard-head">
+      <div>
+        <div class="eyebrow">AGENT ONE</div>
+        <h2>${escapeHtml(agent.title)}</h2>
+        <p class="muted">Stage: <strong>${escapeHtml(agent.stage)}</strong> · Blockers: ${blocking}</p>
+      </div>
+      <button id="runNextBtn" class="primary">${nextButtonLabel}</button>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card"><span>Review scen</span><strong>${review.approved}/${review.total}</strong><small>${review.pending_ids.length ? `Pending: ${review.pending_ids.join(", ")}` : "Gotowe"}</small></div>
+      <div class="kpi-card"><span>Visual QA</span><strong>${visualScore}</strong><small>${escapeHtml(vqa.aggregate_status || "not run")}</small></div>
+      <div class="kpi-card"><span>Shot QA</span><strong>${state.audit?.score ?? 0}/100</strong><small>${state.audit?.warnings?.length || 0} ostrzeżeń</small></div>
+      <div class="kpi-card"><span>Tasks</span><strong>${ops.tasks.length}</strong><small>${ops.tasks.filter(t => t.state === "queued" || t.state === "running").length} aktywnych</small></div>
+    </div>
+
+    <div class="dashboard-grid">
+      <section class="ops-card next-card">
+        <div class="eyebrow">NEXT ACTION</div>
+        <h3>${escapeHtml(agent.next_action)}</h3>
+        <p>${escapeHtml(agent.next_action_detail)}</p>
+      </section>
+
+      <section class="ops-card">
+        <div class="eyebrow">UNIVERSE MEMORY</div>
+        <h3>${memory.total_items || 0} wpisów</h3>
+        <p>${escapeHtml(memoryText)}</p>
+        <div class="muted">Bieżący projekt: ${memory.current_project_items || 0} · Poprzednie: ${memory.previous_project_items || 0}</div>
+      </section>
+
+      <section class="ops-card full-span">
+        <div class="eyebrow">READINESS</div>
+        <div class="readiness-list">
+          ${checks.map(check => `
+            <div class="readiness-row ${readinessClass(check)}">
+              <span class="readiness-dot"></span>
+              <div><strong>${escapeHtml(check.label)}</strong><div class="muted">${escapeHtml(check.detail)}</div></div>
+              <span>${check.ok ? "OK" : (check.blocking ? "BLOCK" : "WARN")}</span>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+
+      <section class="ops-card full-span">
+        <div class="eyebrow">VISUAL QA</div>
+        ${vqa.available ? `
+          <div class="visual-qa-summary">
+            <strong>${vqa.score}/100</strong>
+            <p>${escapeHtml(vqa.summary || "Raport Visual QA zapisany.")}</p>
+          </div>
+          ${(vqa.warnings || []).length ? `<ul class="compact-list">${vqa.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul>` : ""}
+        ` : `<p class="muted">Brak zapisanego raportu Visual QA.</p>`}
+      </section>
+    </div>
+  `;
+  $("runNextBtn").addEventListener("click", runNextAction);
+}
+
+async function runNextAction() {
+  const agent = state.ops?.agent;
+  if (!agent) return;
+  if (agent.next_action === "review_scenes") {
+    const pending = state.ops.review?.pending_ids || [];
+    if (pending.length) state.selectedId = pending[0];
+    switchView("scenes");
+    renderSceneGrid();
+    renderSelected();
+    toast("Review scen jest aktualnym krokiem Agent One");
+    return;
+  }
+  try {
+    const result = await api(`/api/projects/${state.projectId}/agent/enqueue-next`, { method: "POST" });
+    if (result.queued) toast(`Task ${result.task.stage} dodany do kolejki`);
+    else toast(`Nie dodano taska: ${result.reason}`);
+    await loadProjectData();
+    switchView("tasks");
+  } catch (err) {
+    alert(`Nie udało się uruchomić następnego kroku: ${err.message}`);
+  }
+}
+
+function renderTasks() {
+  const tasks = state.ops?.tasks || [];
+  if (!tasks.length) {
+    taskPanel.innerHTML = `<div class="empty-state">Brak tasków dla tego projektu.</div>`;
+    return;
+  }
+  taskPanel.innerHTML = tasks.map(task => `
+    <article class="task-row">
+      <div class="task-main">
+        <div><strong>${escapeHtml(task.stage)}</strong> <span class="task-state ${escapeHtml(task.state)}">${escapeHtml(task.state)}</span></div>
+        <div class="muted">${escapeHtml(task.task_id)} · ${escapeHtml(task.resource)}${task.scene_id ? ` · scene ${task.scene_id}` : ""}</div>
+        ${task.error ? `<div class="task-error">${escapeHtml(task.error)}</div>` : ""}
+      </div>
+      <div class="task-progress"><strong>${task.progress}%</strong><div class="progress-track"><span style="width:${Math.max(0, Math.min(100, task.progress))}%"></span></div></div>
+    </article>
+  `).join("");
 }
 
 function renderSceneGrid() {
@@ -105,6 +251,11 @@ function selectedScene() {
   return state.scenes.find(s => s.scene_id === state.selectedId);
 }
 
+function visualNoteFor(sceneId) {
+  const notes = state.ops?.visual_qa?.scene_notes || [];
+  return notes.find(note => Number(note.scene_id) === Number(sceneId)) || null;
+}
+
 function renderSelected() {
   const scene = selectedScene();
   if (!scene) {
@@ -116,6 +267,7 @@ function renderSelected() {
   const asset = scene.active_asset;
   const audit = state.audit || { score: 0, warnings: [] };
   const warnings = audit.warnings || [];
+  const visualNote = visualNoteFor(scene.scene_id);
   scenePanel.innerHTML = `
     <img class="panel-preview" src="${scene.image_url}" alt="Scena ${scene.scene_id}" />
     <div class="panel-head">
@@ -125,6 +277,14 @@ function renderSelected() {
       </div>
       <span class="badge ${scene.status}">${statusLabel(scene.status)}</span>
     </div>
+
+    ${visualNote ? `
+      <div class="detail-block visual-note ${escapeHtml(visualNote.severity || "info")}">
+        <h3>Visual QA · ${escapeHtml(visualNote.severity || "info")}</h3>
+        <p>${escapeHtml(visualNote.issue || "")}</p>
+        ${visualNote.recommendation ? `<p class="muted visual-recommendation">${escapeHtml(visualNote.recommendation)}</p>` : ""}
+      </div>
+    ` : ""}
 
     <div class="detail-block">
       <h3>Narracja</h3>
@@ -142,33 +302,18 @@ function renderSelected() {
     <div class="detail-block">
       <h3>Shot Director</h3>
       <div class="editor-grid">
-        <label>Shot type
-          <select id="shotTypeInput">${selectOptions(SHOT_TYPES, scene.shot?.shot_type || "medium")}</select>
-        </label>
-        <label>Camera
-          <select id="cameraInput">${selectOptions(CAMERA_TYPES, scene.shot?.camera || "static")}</select>
-        </label>
-        <label>Purpose
-          <select id="purposeInput">${selectOptions(PURPOSE_TYPES, scene.shot?.purpose || "story")}</select>
-        </label>
-        <label>Motion
-          <select id="motionInput">${selectOptions(MOTION_TYPES, scene.motion || "static")}</select>
-        </label>
-        <label>Motion intensity
-          <select id="motionIntensityInput">${selectOptions(MOTION_INTENSITIES, scene.shot?.motion_intensity || "low")}</select>
-        </label>
-        <label>Visual anchor
-          <input id="visualAnchorInput" type="text" value="${escapeHtml(scene.shot?.visual_anchor || scene.continuity_refs?.[0] || "")}" />
-        </label>
+        <label>Shot type<select id="shotTypeInput">${selectOptions(SHOT_TYPES, scene.shot?.shot_type || "medium")}</select></label>
+        <label>Camera<select id="cameraInput">${selectOptions(CAMERA_TYPES, scene.shot?.camera || "static")}</select></label>
+        <label>Purpose<select id="purposeInput">${selectOptions(PURPOSE_TYPES, scene.shot?.purpose || "story")}</select></label>
+        <label>Motion<select id="motionInput">${selectOptions(MOTION_TYPES, scene.motion || "static")}</select></label>
+        <label>Motion intensity<select id="motionIntensityInput">${selectOptions(MOTION_INTENSITIES, scene.shot?.motion_intensity || "low")}</select></label>
+        <label>Visual anchor<input id="visualAnchorInput" type="text" value="${escapeHtml(scene.shot?.visual_anchor || scene.continuity_refs?.[0] || "")}" /></label>
       </div>
       <button id="saveSceneBtn" class="primary save-scene">Zapisz scenę</button>
     </div>
 
     <div class="detail-block qa-block ${audit.ok ? "qa-ok" : "qa-warn"}">
-      <div class="qa-head">
-        <h3>Shot QA</h3>
-        <strong>${audit.score}/100</strong>
-      </div>
+      <div class="qa-head"><h3>Shot QA</h3><strong>${audit.score}/100</strong></div>
       ${warnings.length ? `<details><summary>${warnings.length} ostrzeżeń</summary><ul>${warnings.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details>` : `<p class="muted">Brak ostrzeżeń Shot Directora.</p>`}
     </div>
 
@@ -219,7 +364,7 @@ async function saveSelectedScene() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    await loadScenes();
+    await loadProjectData();
     toast(result.changed ? `Scena ${scene.scene_id}: zapisano nową rewizję` : "Brak zmian do zapisania");
   } catch (err) {
     alert(`Nie udało się zapisać sceny: ${err.message}`);
@@ -237,7 +382,7 @@ async function replaceSelected(event) {
   try {
     toast("Importuję nową wersję sceny…");
     await api(`/api/projects/${state.projectId}/scenes/${scene.scene_id}/replace`, { method: "POST", body: form });
-    await loadScenes();
+    await loadProjectData();
     toast(`Scena ${scene.scene_id}: nowy obraz aktywny`);
   } catch (err) {
     alert(`Import nie powiódł się: ${err.message}`);
@@ -251,7 +396,7 @@ async function mutateSelected(action) {
   form.append("note", action === "approve" ? "Approved in CSP Studio GUI" : "Marked for regeneration in CSP Studio GUI");
   try {
     await api(`/api/projects/${state.projectId}/scenes/${scene.scene_id}/${action}`, { method: "POST", body: form });
-    await loadScenes();
+    await loadProjectData();
     toast(action === "approve" ? "Scena zatwierdzona" : "Scena oznaczona do regeneracji");
   } catch (err) {
     alert(err.message);
@@ -282,18 +427,15 @@ async function showHistory() {
   }
 }
 
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
-}
-
 projectSelect.addEventListener("change", async () => {
   state.projectId = projectSelect.value;
   state.selectedId = null;
-  await loadScenes({ keepSelection: false });
+  await loadProjectData({ keepSelection: false });
 });
 $("refreshBtn").addEventListener("click", () => loadProjects().catch(err => alert(err.message)));
 $("closeHistory").addEventListener("click", () => historyDialog.close());
+document.querySelectorAll(".view-tab").forEach(btn => btn.addEventListener("click", () => switchView(btn.dataset.view)));
 
 loadProjects().catch(err => {
-  sceneGrid.innerHTML = `<div class="empty-state">Nie udało się uruchomić Studio: ${escapeHtml(err.message)}</div>`;
+  opsDashboard.innerHTML = `<div class="empty-state">Nie udało się uruchomić Studio: ${escapeHtml(err.message)}</div>`;
 });
