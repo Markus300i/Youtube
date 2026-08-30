@@ -17,12 +17,22 @@ from csp_studio.visual_qa import VisualQA
 class FakeVisionProvider:
     name = "fake_vision"
 
-    def __init__(self, *, empty_scene: int | None = None, invalid_aggregate: bool = False, aggregate_error: bool = False):
+    def __init__(
+        self,
+        *,
+        empty_scene: int | None = None,
+        invalid_aggregate: bool = False,
+        aggregate_error: bool = False,
+        missing_score: bool = False,
+        empty_note: bool = False,
+    ):
         self.image_calls: list[dict] = []
         self.chat_calls: list[dict] = []
         self.empty_scene = empty_scene
         self.invalid_aggregate = invalid_aggregate
         self.aggregate_error = aggregate_error
+        self.missing_score = missing_score
+        self.empty_note = empty_note
 
     def analyze_images(self, prompt, image_paths, *, model=None, temperature=0.1, max_tokens=1600):
         paths = list(image_paths)
@@ -58,6 +68,10 @@ class FakeVisionProvider:
                 }
             ],
         }
+        if self.missing_score:
+            payload.pop("score")
+        if self.empty_note:
+            payload["scene_notes"] = [{"scene_id": 1, "severity": "warning", "issue": "", "recommendation": ""}]
         return ProviderResponse(provider=self.name, model="fake-text", text=json.dumps(payload))
 
 
@@ -102,6 +116,7 @@ class VisualQATests(unittest.TestCase):
 
                 self.assertEqual(report.score, 74)
                 self.assertEqual(report.strategy, "single_scene_prose_v2")
+                self.assertEqual(report.aggregate_status, "complete")
                 self.assertEqual(len(provider.image_calls), 8)
                 self.assertEqual(len(provider.chat_calls), 1)
                 self.assertTrue(all(len(call["paths"]) == 1 for call in provider.image_calls))
@@ -110,7 +125,11 @@ class VisualQATests(unittest.TestCase):
 
                 saved = json.loads(report_path.read_text(encoding="utf-8"))
                 self.assertEqual(saved["score"], 74)
-                self.assertEqual(saved["strategy"], "single_scene_prose_v2")
+                self.assertEqual(saved["aggregate_status"], "complete")
+                debug = json.loads((project_dir / "qa" / "aggregate-response.json").read_text(encoding="utf-8"))
+                self.assertEqual(debug["model"], "fake-text")
+                self.assertTrue(debug["text"])
+
                 for scene_id in range(1, 9):
                     scene_file = project_dir / "qa" / "scenes" / f"scene-{scene_id:02d}.json"
                     scene_data = json.loads(scene_file.read_text(encoding="utf-8"))
@@ -149,7 +168,7 @@ class VisualQATests(unittest.TestCase):
                 self._attach_images(store, project_dir)
                 qa = VisualQA(store, output_root=root)
                 report, _ = qa.run("001", provider)
-                self.assertEqual(report.strategy, "single_scene_prose_v2")
+                self.assertEqual(report.aggregate_status, "fallback")
                 self.assertEqual(report.score, 100)
                 self.assertIn("Structured aggregate unavailable", report.summary)
                 self.assertEqual(qa.tasks.get_checkpoint("001", "visual_qa")["state"], "done")
@@ -164,9 +183,38 @@ class VisualQATests(unittest.TestCase):
                 self._attach_images(store, project_dir)
                 qa = VisualQA(store, output_root=root)
                 report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "fallback")
                 self.assertEqual(report.score, 100)
-                self.assertEqual(qa.tasks.get_checkpoint("001", "visual_qa")["state"], "done")
                 self.assertTrue(any("410" in warning for warning in report.warnings))
+                debug = json.loads((project_dir / "qa" / "aggregate-response.json").read_text(encoding="utf-8"))
+                self.assertIn("410", debug["error"])
+
+    def test_json_missing_score_uses_fallback_not_silent_zero(self):
+        provider = FakeVisionProvider(missing_score=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "001-drzwi-0"
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project())
+                self._attach_images(store, project_dir)
+                qa = VisualQA(store, output_root=root)
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "fallback")
+                self.assertEqual(report.score, 100)
+                self.assertTrue(any("missing required fields" in warning for warning in report.warnings))
+
+    def test_empty_scene_note_is_dropped(self):
+        provider = FakeVisionProvider(empty_note=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "001-drzwi-0"
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project())
+                self._attach_images(store, project_dir)
+                qa = VisualQA(store, output_root=root)
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "complete")
+                self.assertEqual(report.scene_notes, [])
 
 
 if __name__ == "__main__":
