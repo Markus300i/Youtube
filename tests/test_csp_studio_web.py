@@ -16,7 +16,7 @@ from csp_studio.store import StudioStore
 
 
 class StudioWebTests(unittest.TestCase):
-    def test_gui_edits_scene_plan_and_replaces_one_image(self) -> None:
+    def test_gui_edits_scene_plan_replaces_image_and_reports_ops_dashboard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "output"
             output.mkdir()
@@ -46,8 +46,10 @@ class StudioWebTests(unittest.TestCase):
             os.environ["CSP_OUTPUT_DIR"] = str(output)
             os.environ["CSP_STUDIO_DB"] = str(db)
             try:
+                import csp_studio.ops_api as ops_api
                 import csp_studio.web_app as web_app
 
+                importlib.reload(ops_api)
                 web_app = importlib.reload(web_app)
                 client = TestClient(web_app.app)
 
@@ -66,6 +68,21 @@ class StudioWebTests(unittest.TestCase):
                 self.assertEqual(audit.status_code, 200)
                 self.assertIn("score", audit.json())
                 self.assertIn("warnings", audit.json())
+
+                ops = client.get("/api/projects/001/ops-dashboard")
+                self.assertEqual(ops.status_code, 200, ops.text)
+                ops_data = ops.json()
+                self.assertEqual(ops_data["agent"]["next_action"], "fix_scene_plan")
+                self.assertEqual(ops_data["review"]["total"], 2)
+                self.assertEqual(ops_data["review"]["approved"], 0)
+                self.assertIn("visual_qa", ops_data)
+                self.assertIn("memory", ops_data)
+                self.assertEqual(ops_data["tasks"], [])
+
+                enqueue = client.post("/api/projects/001/agent/enqueue-next")
+                self.assertEqual(enqueue.status_code, 200, enqueue.text)
+                self.assertFalse(enqueue.json()["queued"])
+                self.assertEqual(enqueue.json()["reason"], "fix_scene_plan")
 
                 edit = client.put(
                     "/api/projects/001/scenes/1",
@@ -129,6 +146,18 @@ class StudioWebTests(unittest.TestCase):
                 self.assertTrue((images / "scene-01.png").is_file())
                 self.assertTrue((images / "revisions" / "scene-01-r1.png").is_file())
                 self.assertTrue((images / "revisions" / "scene-01-r2.png").is_file())
+
+                approve = client.post(
+                    "/api/projects/001/scenes/1/approve",
+                    data={"note": "ops dashboard review test"},
+                )
+                self.assertEqual(approve.status_code, 200, approve.text)
+                self.assertEqual(approve.json()["status"], "approved")
+
+                after_review = client.get("/api/projects/001/ops-dashboard")
+                self.assertEqual(after_review.status_code, 200, after_review.text)
+                self.assertEqual(after_review.json()["review"]["approved"], 1)
+                self.assertEqual(after_review.json()["review"]["pending_ids"], [2])
             finally:
                 if old_output is None:
                     os.environ.pop("CSP_OUTPUT_DIR", None)
