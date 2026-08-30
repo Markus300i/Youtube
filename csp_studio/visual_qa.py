@@ -54,7 +54,7 @@ class VisualQAReport:
     shot_director_score: int = 100
     shot_director_warnings: list[str] = field(default_factory=list)
     raw_text: str = ""
-    strategy: str = "single_scene_v1"
+    strategy: str = "single_scene_prose_v2"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -114,13 +114,14 @@ class VisualQA:
             start = value.find("{")
             end = value.rfind("}")
             if start < 0 or end <= start:
-                raise ProviderError("Visual QA provider did not return JSON")
+                preview = value[:300].replace("\n", " ")
+                raise ProviderError(f"Visual QA aggregator did not return JSON. Response starts: {preview!r}")
             try:
                 data = json.loads(value[start : end + 1])
             except json.JSONDecodeError as exc:
-                raise ProviderError("Visual QA provider returned invalid JSON") from exc
+                raise ProviderError("Visual QA aggregator returned invalid JSON") from exc
         if not isinstance(data, dict):
-            raise ProviderError("Visual QA response must be a JSON object")
+            raise ProviderError("Visual QA aggregate response must be a JSON object")
         return data
 
     @staticmethod
@@ -161,13 +162,10 @@ class VisualQA:
         return (
             "You are Visual Director QA for a FICTIONAL Polish documentary-thriller YouTube Short. "
             f"Review ONLY the attached frame for Scene {scene_id}. Evaluate the actual image. "
-            "Focus on framing, camera angle, dominant subject, location cues, documentary realism, AI-looking faces/hands/anatomy, "
-            "9:16 phone readability, and whether the image supports its narration. Do not compare it to unseen frames. "
-            "Return ONLY valid JSON, no markdown, in this exact shape:\n"
-            "{\"scene_id\":1,\"scene_score\":0-100,\"visual_signature\":{\"framing\":\"...\",\"camera_angle\":\"...\","
-            "\"dominant_subject\":\"...\",\"location\":\"...\",\"recurring_elements\":[\"...\"]},"
-            "\"warnings\":[\"...\"],\"continuity_cues\":[\"...\"],\"issue\":\"...\",\"recommendation\":\"...\","
-            "\"severity\":\"info|warning|critical\"}\n"
+            "Write a concise factual review in plain text, maximum 120 words. Cover: framing/camera angle, dominant subject, location cues, "
+            "documentary realism, obvious AI-looking faces/hands/anatomy, 9:16 phone readability, and whether the image supports the narration. "
+            "Mention any recurring visual element that could matter for continuity. If something is fine, say so briefly. "
+            "Do not output JSON or markdown and do not compare against unseen scenes.\n"
             f"Project: {project['title']}\nVisual style: {project['visual_style']}\nScene context: {json.dumps(context, ensure_ascii=False)}"
         )
 
@@ -176,20 +174,18 @@ class VisualQA:
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _run_scene(
-        self,
-        project_id: str,
-        provider: VisionProvider,
-        images: dict[int, Path],
-        scene_id: int,
-    ) -> dict[str, Any]:
+    def _run_scene(self, project_id: str, provider: VisionProvider, images: dict[int, Path], scene_id: int) -> dict[str, Any]:
         stage = f"visual_qa_scene_{scene_id:02d}"
         artifact = self._scene_path(project_id, scene_id)
         checkpoint = self.tasks.get_checkpoint(project_id, stage)
         if checkpoint and checkpoint["state"] == "done" and artifact.is_file():
             try:
                 cached = json.loads(artifact.read_text(encoding="utf-8"))
-                if isinstance(cached, dict) and int(cached.get("scene_id", -1)) == scene_id:
+                if (
+                    isinstance(cached, dict)
+                    and int(cached.get("scene_id", -1)) == scene_id
+                    and str(cached.get("review_text") or "").strip()
+                ):
                     print(f"VISUAL QA SCENE {scene_id:02d}: RESUME")
                     return cached
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -202,28 +198,16 @@ class VisualQA:
                 self._scene_prompt(project_id, scene_id),
                 [str(images[scene_id])],
                 temperature=0.1,
-                max_tokens=650,
+                max_tokens=420,
             )
-            data = self._parse_json(response.text)
-            signature = data.get("visual_signature") if isinstance(data.get("visual_signature"), dict) else {}
-            severity = str(data.get("severity") or "info").lower()
-            if severity not in {"info", "warning", "critical"}:
-                severity = "warning"
+            review_text = str(response.text or "").strip()
+            if not review_text:
+                raise ProviderError(
+                    f"Vision provider returned empty text for Scene {scene_id:02d}; model={response.model}"
+                )
             payload = {
                 "scene_id": scene_id,
-                "scene_score": max(0, min(100, int(data.get("scene_score", 0)))),
-                "visual_signature": {
-                    "framing": str(signature.get("framing") or "").strip(),
-                    "camera_angle": str(signature.get("camera_angle") or "").strip(),
-                    "dominant_subject": str(signature.get("dominant_subject") or "").strip(),
-                    "location": str(signature.get("location") or "").strip(),
-                    "recurring_elements": [str(x) for x in (signature.get("recurring_elements") or [])],
-                },
-                "warnings": [str(x) for x in (data.get("warnings") or [])],
-                "continuity_cues": [str(x) for x in (data.get("continuity_cues") or [])],
-                "issue": str(data.get("issue") or "").strip(),
-                "recommendation": str(data.get("recommendation") or "").strip(),
-                "severity": severity,
+                "review_text": review_text,
                 "provider": response.provider,
                 "model": response.model,
             }
@@ -233,69 +217,36 @@ class VisualQA:
                 stage,
                 "done",
                 artifact_path=artifact,
-                metadata={"scene_score": payload["scene_score"], "provider": response.provider, "model": response.model},
+                metadata={"provider": response.provider, "model": response.model, "chars": len(review_text)},
             )
             return payload
         except Exception as exc:
-            self.tasks.set_checkpoint(
-                project_id,
-                stage,
-                "failed",
-                metadata={"error": f"{type(exc).__name__}: {exc}"},
-            )
+            self.tasks.set_checkpoint(project_id, stage, "failed", metadata={"error": f"{type(exc).__name__}: {exc}"})
             raise
 
     def _aggregate_prompt(self, project_id: str, scene_results: list[dict[str, Any]], shot_score: int, shot_warnings: list[str]) -> str:
         project = self._project_row(project_id)
+        compact = [{"scene_id": item["scene_id"], "review_text": item["review_text"]} for item in scene_results]
         return (
             "You are the final Visual Director QA aggregator for a FICTIONAL Polish documentary-thriller Short. "
-            "You are NOT viewing images now. Use only the eight verified single-scene review JSON objects and Shot Director findings. "
-            "Compare visual_signature fields to identify repeated adjacent framing/camera language and continuity consistency. "
-            "Do not invent visual facts. Return ONLY valid JSON in this shape:\n"
-            "{\"score\":0-100,\"summary\":\"...\",\"warnings\":[\"...\"],\"continuity\":[\"...\"],"
-            "\"monotony\":[\"...\"],\"scene_notes\":[{\"scene_id\":1,\"severity\":\"info|warning|critical\","
-            "\"issue\":\"...\",\"recommendation\":\"...\"}]}\n"
-            f"Project: {project['title']}\nScene reviews: {json.dumps(scene_results, ensure_ascii=False)}\n"
+            "You are NOT viewing images now. Use only the eight verified single-scene visual reviews and Shot Director findings below. "
+            "Compare descriptions to find repeated adjacent framing/subjects, continuity consistency, and scenes needing correction. "
+            "Do not invent visual facts. Return ONLY valid JSON, no markdown, in this exact shape:\n"
+            "{\"score\":0,\"summary\":\"\",\"warnings\":[],\"continuity\":[],\"monotony\":[],"
+            "\"scene_notes\":[{\"scene_id\":1,\"severity\":\"info|warning|critical\",\"issue\":\"\",\"recommendation\":\"\"}]}\n"
+            f"Project: {project['title']}\nScene reviews: {json.dumps(compact, ensure_ascii=False)}\n"
             f"Shot Director score: {shot_score}; warnings: {json.dumps(shot_warnings, ensure_ascii=False)}"
         )
 
-    def _local_aggregate(self, scene_results: list[dict[str, Any]], shot_score: int) -> dict[str, Any]:
-        scores = [int(item.get("scene_score", 0)) for item in scene_results]
-        scene_average = round(sum(scores) / len(scores)) if scores else 0
-        score = round(scene_average * 0.8 + shot_score * 0.2)
-        warnings = list(dict.fromkeys(x for item in scene_results for x in item.get("warnings", [])))
-        continuity = list(dict.fromkeys(x for item in scene_results for x in item.get("continuity_cues", [])))
-        monotony: list[str] = []
-        for left, right in zip(scene_results, scene_results[1:]):
-            ls = left.get("visual_signature") or {}
-            rs = right.get("visual_signature") or {}
-            if (
-                ls.get("framing")
-                and ls.get("framing") == rs.get("framing")
-                and ls.get("camera_angle")
-                and ls.get("camera_angle") == rs.get("camera_angle")
-            ):
-                monotony.append(
-                    f"Scenes {left['scene_id']} and {right['scene_id']} repeat framing={ls.get('framing')} and camera_angle={ls.get('camera_angle')}."
-                )
-        scene_notes = []
-        for item in scene_results:
-            if item.get("issue") or item.get("recommendation"):
-                scene_notes.append(
-                    {
-                        "scene_id": item["scene_id"],
-                        "severity": item.get("severity", "info"),
-                        "issue": item.get("issue", ""),
-                        "recommendation": item.get("recommendation", ""),
-                    }
-                )
+    @staticmethod
+    def _fallback_aggregate(scene_results: list[dict[str, Any]], shot_score: int) -> dict[str, Any]:
         return {
-            "score": max(0, min(100, score)),
-            "summary": "Single-scene Visual QA completed; final score combines scene reviews with Shot Director structure.",
-            "warnings": warnings,
-            "continuity": continuity,
-            "monotony": monotony,
-            "scene_notes": scene_notes,
+            "score": max(0, min(100, int(shot_score))),
+            "summary": "Visual scene reviews completed. Structured aggregate unavailable; inspect per-scene review_text artifacts.",
+            "warnings": [],
+            "continuity": [],
+            "monotony": [],
+            "scene_notes": [],
         }
 
     def run(self, project_id: str, provider: VisionProvider) -> tuple[VisualQAReport, Path]:
@@ -317,11 +268,15 @@ class VisualQA:
                 aggregate_response = chat(
                     [{"role": "user", "content": self._aggregate_prompt(project_id, scene_results, shot_audit.score, shot_audit.warnings)}],
                     temperature=0.1,
-                    max_tokens=1400,
+                    max_tokens=1200,
                 )
-                data = self._parse_json(aggregate_response.text)
+                try:
+                    data = self._parse_json(aggregate_response.text)
+                except ProviderError as exc:
+                    print(f"VISUAL QA: AGGREGATE FALLBACK ({exc})")
+                    data = self._fallback_aggregate(scene_results, shot_audit.score)
             else:
-                data = self._local_aggregate(scene_results, shot_audit.score)
+                data = self._fallback_aggregate(scene_results, shot_audit.score)
 
             score = max(0, min(100, int(data.get("score", 0))))
             notes = self._normalize_notes(data)
@@ -340,7 +295,7 @@ class VisualQA:
                 shot_director_score=shot_audit.score,
                 shot_director_warnings=shot_audit.warnings,
                 raw_text=aggregate_response.text if aggregate_response is not None else json.dumps(data, ensure_ascii=False),
-                strategy="single_scene_v1",
+                strategy="single_scene_prose_v2",
             )
             atomic_write_json(report_path, report.to_dict())
             self.tasks.set_checkpoint(
@@ -363,7 +318,7 @@ class VisualQA:
                 project_id,
                 "visual_qa",
                 "failed",
-                metadata={"error": f"{type(exc).__name__}: {exc}", "strategy": "single_scene_v1"},
+                metadata={"error": f"{type(exc).__name__}: {exc}", "strategy": "single_scene_prose_v2"},
             )
             raise
 
