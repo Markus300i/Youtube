@@ -7,10 +7,12 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .agent_one import AgentOne
 from .store import StudioStore
+from .task_engine import TaskEngine
+from .task_runner import run_task
 from .universe_memory import UniverseMemory
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +99,10 @@ def _memory_status(store: StudioStore, project_id: str) -> dict[str, Any]:
     }
 
 
+def _schedule(background_tasks: BackgroundTasks, task_id: str) -> None:
+    background_tasks.add_task(run_task, task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
+
+
 @router.get("/api/projects/{project_id}/ops-dashboard")
 def ops_dashboard(project_id: str):
     with StudioStore(DB_PATH) as store:
@@ -129,3 +135,39 @@ def enqueue_next(project_id: str):
             return AgentOne(store, output_root=OUTPUT_ROOT).enqueue_next(project_id)
         except (KeyError, ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/tasks/{task_id}/run")
+def run_queued_task(task_id: str, background_tasks: BackgroundTasks):
+    with StudioStore(DB_PATH) as store:
+        engine = TaskEngine(store)
+        task = engine.get(task_id)
+        if task is None:
+            raise HTTPException(404, f"Unknown task: {task_id}")
+        if task.state != "queued":
+            raise HTTPException(400, f"Task {task_id} is {task.state}, expected queued")
+        _schedule(background_tasks, task_id)
+        return {"scheduled": True, "task": task.to_dict()}
+
+
+@router.post("/api/tasks/{task_id}/retry")
+def retry_task(task_id: str, background_tasks: BackgroundTasks):
+    with StudioStore(DB_PATH) as store:
+        engine = TaskEngine(store)
+        try:
+            task = engine.retry(task_id)
+        except (KeyError, RuntimeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        _schedule(background_tasks, task_id)
+        return {"scheduled": True, "task": task.to_dict()}
+
+
+@router.post("/api/tasks/{task_id}/cancel")
+def cancel_task(task_id: str):
+    with StudioStore(DB_PATH) as store:
+        engine = TaskEngine(store)
+        try:
+            task = engine.cancel(task_id)
+        except (KeyError, RuntimeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"cancelled": True, "task": task.to_dict()}
