@@ -19,6 +19,11 @@ DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).e
 
 router = APIRouter()
 
+PLACEHOLDER_NOTES = {
+    ("specific issue", "specific fix"),
+    ("issue", "recommendation"),
+}
+
 
 def _slug(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
@@ -35,6 +40,21 @@ def _project_row(store: StudioStore, project_id: str):
 def _project_dir(store: StudioStore, project_id: str) -> Path:
     row = _project_row(store, project_id)
     return OUTPUT_ROOT / f"{project_id}-{_slug(row['title'])}"
+
+
+def _clean_scene_notes(raw_notes: Any) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for raw in raw_notes if isinstance(raw_notes, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        issue = str(raw.get("issue") or "").strip()
+        recommendation = str(raw.get("recommendation") or "").strip()
+        if not issue and not recommendation:
+            continue
+        if (issue.lower(), recommendation.lower()) in PLACEHOLDER_NOTES:
+            continue
+        output.append(dict(raw))
+    return output
 
 
 def _read_visual_qa(store: StudioStore, project_id: str) -> dict[str, Any]:
@@ -55,7 +75,7 @@ def _read_visual_qa(store: StudioStore, project_id: str) -> dict[str, Any]:
         "warnings": list(data.get("warnings") or []),
         "continuity": list(data.get("continuity") or []),
         "monotony": list(data.get("monotony") or []),
-        "scene_notes": list(data.get("scene_notes") or []),
+        "scene_notes": _clean_scene_notes(data.get("scene_notes")),
         "aggregate_status": str(data.get("aggregate_status") or "unknown"),
         "provider": str(data.get("provider") or "unknown"),
         "model": str(data.get("model") or "unknown"),
