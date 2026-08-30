@@ -35,6 +35,7 @@ jobs:
           python -m unittest \
             tests.test_csp_actions \
             tests.test_csp_quick_cancel \
+            tests.test_csp_comfy_control \
             tests.test_csp_pipeline_state \
             tests.test_csp_task_engine \
             tests.test_csp_task_runner \
