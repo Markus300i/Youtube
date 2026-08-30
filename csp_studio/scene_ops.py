@@ -11,7 +11,9 @@ from PIL import Image
 
 from .asset_manager import AssetManager, VALID_SCENE_STATUSES
 from .models import Asset
+from .pipeline_state import invalidate_after_image_change
 from .store import StudioStore
+from .task_engine import TaskEngine
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -72,7 +74,6 @@ class SceneOperations:
         revision_path = self.revisions_dir / f"scene-{scene_id:02d}-r{revision}.png"
         self._write_png(incoming, revision_path)
 
-        # Backward compatibility: CSP Automation V1 still renders scene-XX.png.
         shutil.copy2(revision_path, canonical)
 
         metadata = {
@@ -83,7 +84,7 @@ class SceneOperations:
         if note:
             metadata["note"] = note
 
-        return self.assets.register_asset(
+        asset = self.assets.register_asset(
             project_id,
             scene_id,
             revision_path,
@@ -93,6 +94,13 @@ class SceneOperations:
             metadata=metadata,
             activate=True,
         )
+        invalidate_after_image_change(
+            TaskEngine(self.store),
+            project_id,
+            scene_id=scene_id,
+            reason=f"scene {scene_id} image revision changed to r{asset.revision}",
+        )
+        return asset
 
     def approve(self, project_id: str, scene_id: int, note: str = "") -> None:
         self.assets.approve_scene(project_id, scene_id, note)
@@ -174,9 +182,7 @@ def _print_description(data: dict[str, Any]) -> None:
     print(f"SCENE REVISION: r{data['scene_revision']}")
     active = data["active_asset"]
     if active:
-        print(
-            f"ACTIVE IMAGE: r{active['revision']} | {active['source']} | {active['path']}"
-        )
+        print(f"ACTIVE IMAGE: r{active['revision']} | {active['source']} | {active['path']}")
     else:
         print("ACTIVE IMAGE: none")
     print(f"CANONICAL: {data['canonical_path']}")
@@ -185,22 +191,14 @@ def _print_description(data: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="CSP Studio per-scene operations.")
     parser.add_argument("--db", default=None, help="Studio SQLite path")
-    parser.add_argument(
-        "--images-dir",
-        required=True,
-        help="Renderer images directory, e.g. C:\\CSP\\output\\001-drzwi-0\\images",
-    )
+    parser.add_argument("--images-dir", required=True, help="Renderer images directory, e.g. C:\\CSP\\output\\001-drzwi-0\\images")
     sub = parser.add_subparsers(dest="command", required=True)
 
     show = sub.add_parser("show", help="Show scene state and active image")
     show.add_argument("project_id")
     show.add_argument("scene_id", type=int)
 
-    replace = sub.add_parser(
-        "replace",
-        aliases=["import-replace"],
-        help="Import an external image and replace one scene",
-    )
+    replace = sub.add_parser("replace", aliases=["import-replace"], help="Import an external image and replace one scene")
     replace.add_argument("project_id")
     replace.add_argument("scene_id", type=int)
     replace.add_argument("file")
@@ -232,18 +230,11 @@ def main() -> None:
 
     with StudioStore(db_path) as store:
         ops = SceneOperations(store, args.images_dir)
-
         if args.command == "show":
             _print_description(ops.describe(args.project_id, args.scene_id))
             return
         if args.command in {"replace", "import-replace"}:
-            asset = ops.replace_image(
-                args.project_id,
-                args.scene_id,
-                args.file,
-                source=args.source,
-                note=args.note,
-            )
+            asset = ops.replace_image(args.project_id, args.scene_id, args.file, source=args.source, note=args.note)
             print(f"REPLACED scene {args.scene_id:02d}: image r{asset.revision}")
             _print_description(ops.describe(args.project_id, args.scene_id))
             return
