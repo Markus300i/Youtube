@@ -58,6 +58,7 @@ class StudioWorker:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.lease_seconds)
         recovered: list[str] = []
         with StudioStore(self.db_path) as store:
+            TaskEngine(store)  # Ensure durable task/checkpoint tables exist on a fresh Studio DB.
             rows = store.conn.execute(
                 "SELECT task_id,updated_at FROM studio_tasks WHERE state='running'"
             ).fetchall()
