@@ -8,10 +8,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .log_safety import safe_exception_message
 from .new_short_wizard import NewShortWizard, WizardValidationError
 from .production_run import ProductionRunCoordinator
+from .providers import get_provider
 from .store import StudioStore
 from .visual_bible import VALID_KINDS, VisualBible, VisualBibleEntity
+from .wizard_v2 import WizardV2, WizardV2Error, create_reviewed_wizard_v2
+from .worker_registry import WorkerRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -37,6 +41,13 @@ class VisualBibleAssignmentInput(BaseModel):
     entity_keys: list[str] = Field(default_factory=list)
 
 
+class WizardV2DraftInput(BaseModel):
+    topic: str = Field(min_length=3, max_length=2000)
+    project_id: str | None = Field(default=None, max_length=64)
+    title: str | None = Field(default=None, max_length=200)
+    provider: str | None = Field(default=None, max_length=80)
+
+
 def _production_payload(store: StudioStore, project_id: str) -> dict[str, Any]:
     coordinator = ProductionRunCoordinator(store, output_root=OUTPUT_ROOT)
     run = coordinator.status(project_id)
@@ -47,6 +58,18 @@ def _production_payload(store: StudioStore, project_id: str) -> dict[str, Any]:
 @router.get("/flow.js")
 def flow_js():
     return FileResponse(WEB_DIR / "flow.js", media_type="application/javascript")
+
+
+@router.get("/api/workers")
+def worker_status():
+    with StudioStore(DB_PATH) as store:
+        workers = WorkerRegistry(store).list(online_ttl_seconds=20)
+        online = [item for item in workers if item.online]
+        return {
+            "online": len(online),
+            "total": len(workers),
+            "workers": [item.to_dict() for item in workers],
+        }
 
 
 @router.get("/api/projects/{project_id}/production-run")
@@ -94,6 +117,37 @@ def create_project_from_wizard(payload: dict[str, Any]):
         except FileExistsError as exc:
             raise HTTPException(409, f"Source YAML already exists: {exc}") from exc
         except (WizardValidationError, KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/wizard/v2/draft")
+def draft_project_v2(payload: WizardV2DraftInput):
+    provider = None
+    try:
+        provider = get_provider(payload.provider)
+        return WizardV2(provider).draft(
+            payload.topic,
+            project_id=payload.project_id,
+            title=payload.title,
+        ).to_dict()
+    except WizardV2Error as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, safe_exception_message(exc)) from exc
+    finally:
+        close = getattr(provider, "close", None)
+        if callable(close):
+            close()
+
+
+@router.post("/api/wizard/v2/create")
+def create_project_v2(payload: dict[str, Any]):
+    with StudioStore(DB_PATH) as store:
+        try:
+            return create_reviewed_wizard_v2(store, shorts_dir=SHORTS_DIR, envelope=payload)
+        except FileExistsError as exc:
+            raise HTTPException(409, f"Source YAML already exists: {exc}") from exc
+        except (WizardV2Error, WizardValidationError, KeyError, TypeError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
 
