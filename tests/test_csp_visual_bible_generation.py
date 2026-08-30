@@ -46,7 +46,7 @@ class VisualBibleGenerationTests(unittest.TestCase):
                 bible.assign("001", 1, ["hero"])
 
             data = {"id": "001", "scenes": [{"id": 1, "prompt": "kanoniczny prompt"}]}
-            with patch.dict(os.environ, {"CSP_STUDIO_DB": str(db)}, clear=False):
+            with patch.dict(os.environ, {"CSP_STUDIO_DB": str(db)}, clear=False), patch("builtins.print") as print_mock:
                 result = module._apply_visual_bible(data, 1)
 
             scene_payload = result["scenes"][0]
@@ -55,6 +55,14 @@ class VisualBibleGenerationTests(unittest.TestCase):
             self.assertTrue(scene_payload["prompt"].endswith("kanoniczny prompt"))
             self.assertEqual(scene_payload["visual_bible_entities"], ["style", "hero"])
             self.assertEqual(len(scene_payload["visual_bible_reference_assets"]), 1)
+
+            matching_calls = [
+                call
+                for call in print_mock.call_args_list
+                if call.args and "VISUAL BIBLE: scene 01 compiled with 2 entity/entities" in str(call.args[0])
+            ]
+            self.assertEqual(len(matching_calls), 1)
+            self.assertIs(matching_calls[0].kwargs.get("flush"), True)
 
             with StudioStore(db) as store:
                 self.assertEqual(store.get_scene("001", 1).prompt, "kanoniczny prompt")
