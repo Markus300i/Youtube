@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import time
@@ -20,13 +21,7 @@ def _resilient_wait_history(
     timeout: int,
     poll: int,
 ) -> dict[str, Any]:
-    """Poll ComfyUI without failing on transient API stalls while GPU is busy.
-
-    Some ComfyUI workloads can make /history temporarily unresponsive for more
-    than the generator's old 30-second per-request timeout. A read timeout does
-    not mean the submitted prompt failed, so keep polling until the configured
-    global timeout expires.
-    """
+    """Poll ComfyUI without failing on transient API stalls while GPU is busy."""
 
     deadline = time.time() + timeout
     last_error: Exception | None = None
@@ -73,6 +68,64 @@ def _resilient_wait_history(
     raise TimeoutError(f"Timeout ComfyUI dla prompt_id={prompt_id}{suffix}")
 
 
+def _apply_visual_bible(data: dict[str, Any], scene_id: int) -> dict[str, Any]:
+    """Compile Visual Bible V2 into the execution-only scene payload.
+
+    SQLite scene.prompt remains canonical and unchanged. If Studio DB is not
+    available (legacy CLI / CI), generation behaves exactly as before.
+    """
+
+    db_value = str(os.getenv("CSP_STUDIO_DB") or "").strip()
+    project_id = str(data.get("id") or "").strip()
+    if not db_value or not project_id:
+        return data
+    db_path = Path(db_value).expanduser().resolve()
+    if not db_path.is_file():
+        return data
+
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from csp_studio.store import StudioStore
+    from csp_studio.visual_bible import VisualBible
+
+    with StudioStore(db_path) as store:
+        canonical_scene = store.get_scene(project_id, scene_id)
+        if canonical_scene is None:
+            return data
+        bible = VisualBible(store)
+        context = bible.prompt_context(project_id, scene_id)
+        entities = bible.assigned(project_id, scene_id)
+        global_entities = bible.list(project_id, kind="style") + bible.list(project_id, kind="rule")
+        ordered = []
+        seen: set[str] = set()
+        for entity in global_entities + entities:
+            if entity.entity_key in seen:
+                continue
+            seen.add(entity.entity_key)
+            ordered.append(entity)
+
+        for raw in data.get("scenes") or []:
+            if not isinstance(raw, dict) or int(raw.get("id", 0)) != scene_id:
+                continue
+            base_prompt = str(raw.get("prompt") or canonical_scene.prompt).strip()
+            if context:
+                raw["prompt"] = f"{context}. {base_prompt}"
+            raw["visual_bible_context"] = context
+            raw["visual_bible_entities"] = [entity.entity_key for entity in ordered]
+            raw["visual_bible_reference_assets"] = [
+                entity.reference_asset_path
+                for entity in ordered
+                if entity.reference_asset_path
+            ]
+            if context:
+                print(
+                    "VISUAL BIBLE: scene "
+                    f"{scene_id:02d} compiled with {len(ordered)} entity/entities"
+                )
+            break
+    return data
+
+
 def _run_generator(temp_path: Path) -> int:
     """Run generate_images in-process so scene jobs can harden ComfyUI polling."""
 
@@ -99,6 +152,7 @@ def main() -> int:
     args = parser.parse_args()
 
     data = load_yaml(args.short_file)
+    data = _apply_visual_bible(data, args.scene)
     selected = [scene for scene in (data.get("scenes") or []) if int(scene.get("id", 0)) == args.scene]
     if not selected:
         raise SystemExit(f"Scene {args.scene} not found in {args.short_file}")
