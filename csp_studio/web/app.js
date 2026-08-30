@@ -6,6 +6,8 @@ const state = {
   audit: null,
   ops: null,
   view: "dashboard",
+  pollTimer: null,
+  polling: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -102,6 +104,22 @@ async function loadProjectData({ keepSelection = true } = {}) {
   renderTasks();
   renderSceneGrid();
   renderSelected();
+  syncTaskPolling();
+}
+
+function syncTaskPolling() {
+  const active = (state.ops?.tasks || []).some(task => task.state === "queued" || task.state === "running");
+  if (active && !state.pollTimer) {
+    state.pollTimer = setInterval(async () => {
+      if (state.polling) return;
+      state.polling = true;
+      try { await loadProjectData(); } catch (_) {}
+      finally { state.polling = false; }
+    }, 2000);
+  } else if (!active && state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
 }
 
 function readinessClass(check) {
@@ -183,6 +201,13 @@ function renderDashboard() {
   $("runNextBtn").addEventListener("click", runNextAction);
 }
 
+async function scheduleTask(taskId) {
+  const result = await api(`/api/tasks/${encodeURIComponent(taskId)}/run`, { method: "POST" });
+  toast(`Uruchomiono ${result.task.stage}`);
+  await loadProjectData();
+  switchView("tasks");
+}
+
 async function runNextAction() {
   const agent = state.ops?.agent;
   if (!agent) return;
@@ -197,13 +222,32 @@ async function runNextAction() {
   }
   try {
     const result = await api(`/api/projects/${state.projectId}/agent/enqueue-next`, { method: "POST" });
-    if (result.queued) toast(`Task ${result.task.stage} dodany do kolejki`);
-    else toast(`Nie dodano taska: ${result.reason}`);
-    await loadProjectData();
-    switchView("tasks");
+    if (result.queued) {
+      toast(`Task ${result.task.stage} dodany do kolejki`);
+      await scheduleTask(result.task.task_id);
+    } else if (result.reason === "already_queued" && result.task?.state === "queued") {
+      await scheduleTask(result.task.task_id);
+    } else {
+      toast(`Nie uruchomiono taska: ${result.reason}`);
+      await loadProjectData();
+      switchView("tasks");
+    }
   } catch (err) {
     alert(`Nie udało się uruchomić następnego kroku: ${err.message}`);
   }
+}
+
+function taskButtons(task) {
+  if (task.state === "queued") {
+    return `<button class="ghost task-action" data-task="${escapeHtml(task.task_id)}" data-action="run">Run</button><button class="danger task-action" data-task="${escapeHtml(task.task_id)}" data-action="cancel">Cancel</button>`;
+  }
+  if (task.state === "running") {
+    return `<button class="danger task-action" data-task="${escapeHtml(task.task_id)}" data-action="cancel">Cancel</button>`;
+  }
+  if (task.state === "failed") {
+    return `<button class="primary task-action" data-task="${escapeHtml(task.task_id)}" data-action="retry">Retry</button>`;
+  }
+  return "";
 }
 
 function renderTasks() {
@@ -218,10 +262,31 @@ function renderTasks() {
         <div><strong>${escapeHtml(task.stage)}</strong> <span class="task-state ${escapeHtml(task.state)}">${escapeHtml(task.state)}</span></div>
         <div class="muted">${escapeHtml(task.task_id)} · ${escapeHtml(task.resource)}${task.scene_id ? ` · scene ${task.scene_id}` : ""}</div>
         ${task.error ? `<div class="task-error">${escapeHtml(task.error)}</div>` : ""}
+        ${task.result?.log_path ? `<div class="muted">Log: ${escapeHtml(task.result.log_path)}</div>` : ""}
+        <div class="task-actions">${taskButtons(task)}</div>
       </div>
       <div class="task-progress"><strong>${task.progress}%</strong><div class="progress-track"><span style="width:${Math.max(0, Math.min(100, task.progress))}%"></span></div></div>
     </article>
   `).join("");
+
+  document.querySelectorAll(".task-action").forEach(button => {
+    button.addEventListener("click", () => taskAction(button.dataset.task, button.dataset.action));
+  });
+}
+
+async function taskAction(taskId, action) {
+  try {
+    if (action === "run") {
+      await scheduleTask(taskId);
+      return;
+    }
+    const result = await api(`/api/tasks/${encodeURIComponent(taskId)}/${action}`, { method: "POST" });
+    toast(action === "retry" ? `Ponowiono ${result.task.stage}` : `Anulowano ${result.task.stage}`);
+    await loadProjectData();
+    switchView("tasks");
+  } catch (err) {
+    alert(`Task ${action} nie powiódł się: ${err.message}`);
+  }
 }
 
 function renderSceneGrid() {
@@ -339,7 +404,7 @@ function renderSelected() {
   $("saveSceneBtn").addEventListener("click", saveSelectedScene);
   $("replaceFile").addEventListener("change", replaceSelected);
   $("approveBtn").addEventListener("click", () => mutateSelected("approve"));
-  $("regenBtn").addEventListener("click", () => mutateSelected("regenerate"));
+  $("regenBtn").addEventListener("click", regenerateSelected);
   $("historyBtn").addEventListener("click", showHistory);
 }
 
@@ -393,13 +458,32 @@ async function mutateSelected(action) {
   const scene = selectedScene();
   if (!scene) return;
   const form = new FormData();
-  form.append("note", action === "approve" ? "Approved in CSP Studio GUI" : "Marked for regeneration in CSP Studio GUI");
+  form.append("note", "Approved in CSP Studio GUI");
   try {
     await api(`/api/projects/${state.projectId}/scenes/${scene.scene_id}/${action}`, { method: "POST", body: form });
     await loadProjectData();
-    toast(action === "approve" ? "Scena zatwierdzona" : "Scena oznaczona do regeneracji");
+    toast("Scena zatwierdzona");
   } catch (err) {
     alert(err.message);
+  }
+}
+
+async function regenerateSelected() {
+  const scene = selectedScene();
+  if (!scene) return;
+  const form = new FormData();
+  form.append("note", "Regenerate requested in CSP Studio GUI");
+  try {
+    const result = await api(`/api/projects/${state.projectId}/scenes/${scene.scene_id}/regenerate`, { method: "POST", body: form });
+    await loadProjectData();
+    if (result.task.state === "queued") {
+      await scheduleTask(result.task.task_id);
+    } else {
+      toast(`Regenerate już trwa dla sceny ${scene.scene_id}`);
+      switchView("tasks");
+    }
+  } catch (err) {
+    alert(`Regenerate nie powiódł się: ${err.message}`);
   }
 }
 
