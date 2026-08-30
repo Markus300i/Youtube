@@ -21,6 +21,7 @@
   document.head.appendChild(style);
 
   let pollBusy = false;
+  let injectScheduled = false;
 
   async function quickRegenerate() {
     const scene = selectedScene();
@@ -54,7 +55,12 @@
   function injectSceneActions() {
     const quality = document.getElementById("regenBtn");
     if (!quality) return;
-    quality.textContent = "Quality Regenerate";
+
+    // Do not rewrite textContent on every MutationObserver callback: doing so
+    // creates another childList mutation and can lock the browser in a loop.
+    if (quality.textContent !== "Quality Regenerate") {
+      quality.textContent = "Quality Regenerate";
+    }
     if (document.getElementById("quickRegenBtn")) return;
 
     const quick = document.createElement("button");
@@ -96,7 +102,16 @@
     injectManualActions();
   }
 
-  const observer = new MutationObserver(() => inject());
+  function scheduleInject() {
+    if (injectScheduled) return;
+    injectScheduled = true;
+    queueMicrotask(() => {
+      injectScheduled = false;
+      inject();
+    });
+  }
+
+  const observer = new MutationObserver(scheduleInject);
   observer.observe(document.body, { childList: true, subtree: true });
   inject();
 
