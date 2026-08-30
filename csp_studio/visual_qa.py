@@ -55,6 +55,7 @@ class VisualQAReport:
     shot_director_warnings: list[str] = field(default_factory=list)
     raw_text: str = ""
     strategy: str = "single_scene_prose_v2"
+    aggregate_status: str = "complete"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -125,6 +126,33 @@ class VisualQA:
         return data
 
     @staticmethod
+    def _validate_aggregate(data: dict[str, Any]) -> dict[str, Any]:
+        required = {"score", "summary", "warnings", "continuity", "monotony", "scene_notes"}
+        missing = sorted(required - set(data))
+        if missing:
+            raise ProviderError(f"Visual QA aggregate is missing required fields: {', '.join(missing)}")
+
+        score = data.get("score")
+        if isinstance(score, bool):
+            raise ProviderError("Visual QA aggregate score must be a number, not boolean")
+        try:
+            numeric_score = int(score)
+        except (TypeError, ValueError) as exc:
+            raise ProviderError(f"Visual QA aggregate score is invalid: {score!r}") from exc
+        if not 0 <= numeric_score <= 100:
+            raise ProviderError(f"Visual QA aggregate score must be 0-100, got {numeric_score}")
+
+        if not isinstance(data.get("summary"), str):
+            raise ProviderError("Visual QA aggregate summary must be text")
+        for key in ("warnings", "continuity", "monotony", "scene_notes"):
+            if not isinstance(data.get(key), list):
+                raise ProviderError(f"Visual QA aggregate {key} must be a list")
+
+        normalized = dict(data)
+        normalized["score"] = numeric_score
+        return normalized
+
+    @staticmethod
     def _normalize_notes(data: dict[str, Any]) -> list[VisualSceneNote]:
         notes: list[VisualSceneNote] = []
         for item in data.get("scene_notes") or []:
@@ -136,6 +164,10 @@ class VisualQA:
                 continue
             if not 1 <= scene_id <= 8:
                 continue
+            issue = str(item.get("issue") or "").strip()
+            recommendation = str(item.get("recommendation") or "").strip()
+            if not issue and not recommendation:
+                continue
             severity = str(item.get("severity") or "info").lower()
             if severity not in {"info", "warning", "critical"}:
                 severity = "warning"
@@ -143,8 +175,8 @@ class VisualQA:
                 VisualSceneNote(
                     scene_id=scene_id,
                     severity=severity,
-                    issue=str(item.get("issue") or "").strip(),
-                    recommendation=str(item.get("recommendation") or "").strip(),
+                    issue=issue,
+                    recommendation=recommendation,
                 )
             )
         return notes
@@ -231,9 +263,12 @@ class VisualQA:
             "You are the final Visual Director QA aggregator for a FICTIONAL Polish documentary-thriller Short. "
             "You are NOT viewing images now. Use only the eight verified single-scene visual reviews and Shot Director findings below. "
             "Compare descriptions to find repeated adjacent framing/subjects, continuity consistency, and scenes needing correction. "
-            "Do not invent visual facts. Return ONLY valid JSON, no markdown, in this exact shape:\n"
-            "{\"score\":0,\"summary\":\"\",\"warnings\":[],\"continuity\":[],\"monotony\":[],"
-            "\"scene_notes\":[{\"scene_id\":1,\"severity\":\"info|warning|critical\",\"issue\":\"\",\"recommendation\":\"\"}]}\n"
+            "Do not invent visual facts. Return ONLY valid JSON, no markdown. "
+            "All six top-level keys are REQUIRED and score MUST be an integer from 0 to 100. "
+            "Do not emit placeholder or empty scene_notes; omit a scene note unless issue or recommendation contains useful text. "
+            "Exact shape:\n"
+            "{\"score\":75,\"summary\":\"short assessment\",\"warnings\":[],\"continuity\":[],\"monotony\":[],"
+            "\"scene_notes\":[{\"scene_id\":4,\"severity\":\"warning\",\"issue\":\"specific issue\",\"recommendation\":\"specific fix\"}]}\n"
             f"Project: {project['title']}\nScene reviews: {json.dumps(compact, ensure_ascii=False)}\n"
             f"Shot Director score: {shot_score}; warnings: {json.dumps(shot_warnings, ensure_ascii=False)}"
         )
@@ -253,19 +288,25 @@ class VisualQA:
             "scene_notes": [],
         }
 
+    @staticmethod
+    def _aggregate_debug_path(project_dir: Path) -> Path:
+        return project_dir / "qa" / "aggregate-response.json"
+
     def run(self, project_id: str, provider: VisionProvider) -> tuple[VisualQAReport, Path]:
         project_dir = self._project_dir(project_id)
         qa_dir = project_dir / "qa"
         qa_dir.mkdir(parents=True, exist_ok=True)
         report_path = qa_dir / "visual-qa.json"
+        aggregate_debug_path = self._aggregate_debug_path(project_dir)
         images = self._review_images(project_id)
         scenes = self.store.list_scenes(project_id)
         shot_audit = ShotDirector().audit(scenes)
         self.tasks.set_checkpoint(project_id, "visual_qa", "running")
+        aggregate_status = "fallback"
+        aggregate_response = None
         try:
             scene_results = [self._run_scene(project_id, provider, images, scene_id) for scene_id in SCENE_IDS]
 
-            aggregate_response = None
             chat = getattr(provider, "chat", None)
             if callable(chat):
                 print("VISUAL QA: AGGREGATE TEXT")
@@ -275,14 +316,28 @@ class VisualQA:
                         temperature=0.1,
                         max_tokens=1200,
                     )
-                    data = self._parse_json(aggregate_response.text)
-                except ProviderError as exc:
+                    atomic_write_json(
+                        aggregate_debug_path,
+                        {
+                            "provider": aggregate_response.provider,
+                            "model": aggregate_response.model,
+                            "text": aggregate_response.text,
+                        },
+                    )
+                    data = self._validate_aggregate(self._parse_json(aggregate_response.text))
+                    aggregate_status = "complete"
+                except Exception as exc:
                     print(f"VISUAL QA: AGGREGATE FALLBACK ({exc})")
+                    if aggregate_response is None:
+                        atomic_write_json(
+                            aggregate_debug_path,
+                            {"provider": getattr(provider, "name", "unknown"), "error": f"{type(exc).__name__}: {exc}"},
+                        )
                     data = self._fallback_aggregate(scene_results, shot_audit.score, str(exc))
             else:
-                data = self._fallback_aggregate(scene_results, shot_audit.score)
+                data = self._fallback_aggregate(scene_results, shot_audit.score, "Provider has no chat aggregation capability")
 
-            score = max(0, min(100, int(data.get("score", 0))))
+            score = int(data["score"])
             notes = self._normalize_notes(data)
             first_provider = scene_results[0].get("provider", getattr(provider, "name", "unknown"))
             first_model = scene_results[0].get("model", "unknown")
@@ -300,6 +355,7 @@ class VisualQA:
                 shot_director_warnings=shot_audit.warnings,
                 raw_text=aggregate_response.text if aggregate_response is not None else json.dumps(data, ensure_ascii=False),
                 strategy="single_scene_prose_v2",
+                aggregate_status=aggregate_status,
             )
             atomic_write_json(report_path, report.to_dict())
             self.tasks.set_checkpoint(
@@ -313,6 +369,7 @@ class VisualQA:
                     "model": report.model,
                     "scene_notes": len(notes),
                     "strategy": report.strategy,
+                    "aggregate_status": aggregate_status,
                     "scenes": len(scene_results),
                 },
             )
@@ -344,6 +401,7 @@ def main() -> None:
         print(f"VISUAL QA: {report.score}/100")
         print(f"PROVIDER: {report.provider} / {report.model}")
         print(f"STRATEGY: {report.strategy}")
+        print(f"AGGREGATE: {report.aggregate_status.upper()}")
         print(f"REPORT: {path}")
         for warning in report.warnings:
             print(f"WARN: {warning}")
