@@ -49,6 +49,20 @@ class TaskEngineTests(unittest.TestCase):
                 self.assertEqual(complete.progress, 100)
                 self.assertEqual(complete.result["path"], "preview.mp4")
 
+    def test_targeted_claim_runs_requested_task_not_oldest_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(self._project())
+                engine = TaskEngine(store)
+                first = engine.submit("001", "captions", resource="cpu")
+                second = engine.submit("001", "sound_design", resource="cpu")
+                claimed = engine.claim(second.task_id, "studio-web")
+                self.assertIsNotNone(claimed)
+                self.assertEqual(claimed.task_id, second.task_id)
+                self.assertEqual(claimed.state, "running")
+                self.assertEqual(engine.get(first.task_id).state, "queued")
+
     def test_only_one_gpu_task_can_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "studio.db"
