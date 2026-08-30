@@ -12,11 +12,11 @@ from .base import ProviderError, ProviderResponse
 
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_CHAT_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-DEFAULT_VISION_MODEL = "meta/muse-glimmer-30b"
+DEFAULT_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
 DEFAULT_EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
 DEFAULT_TIMEOUT = 90.0
-DEFAULT_VISION_TIMEOUT = 240.0
-DEFAULT_VISION_RETRIES = 1
+DEFAULT_VISION_TIMEOUT = 120.0
+DEFAULT_VISION_RETRIES = 0
 
 
 def _clean_api_key(value: str | None) -> str | None:
