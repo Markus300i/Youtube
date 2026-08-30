@@ -42,6 +42,29 @@ class NvidiaNimProviderTests(unittest.TestCase):
         self.assertEqual(response.usage["completion_tokens"], 1)
         client.close()
 
+    def test_retired_chat_model_is_migrated_to_current_default(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content)
+            seen["model"] = payload["model"]
+            return httpx.Response(
+                200,
+                json={"model": payload["model"], "choices": [{"message": {"content": "ok"}}]},
+            )
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        provider = NvidiaNimProvider(
+            api_key="key",
+            base_url="https://nim.test/v1",
+            chat_model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            client=client,
+        )
+        provider.chat([{"role": "user", "content": "hello"}])
+        self.assertEqual(seen["model"], "nvidia/nemotron-3.5-lightning-30b-a3b")
+        self.assertEqual(provider.chat_model, "nvidia/nemotron-3.5-lightning-30b-a3b")
+        client.close()
+
     def test_api_key_trims_surrounding_whitespace(self) -> None:
         seen = {}
 
