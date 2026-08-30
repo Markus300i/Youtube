@@ -65,7 +65,7 @@ def validate_wizard_payload(payload: dict[str, Any]) -> None:
 def normalize_wizard_payload(payload: dict[str, Any]) -> dict[str, Any]:
     data = dict(payload)
     data.setdefault("series", "Ciemna Strona Polski")
-    data["fictional"] = True
+    data.setdefault("fictional", True)
     data.setdefault("status", "draft")
     data.setdefault(
         "visual_style",
