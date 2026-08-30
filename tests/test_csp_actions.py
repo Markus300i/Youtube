@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from csp_studio.action_api import MANUAL_ACTIONS, _quick_snapshot
+from csp_studio.action_api import ACTION_META, MANUAL_ACTIONS, _quick_snapshot
 
 
 class StudioActionsTests(unittest.TestCase):
@@ -61,9 +61,23 @@ class StudioActionsTests(unittest.TestCase):
         self.assertEqual(MANUAL_ACTIONS["tts"], ("tts", "gpu"))
         self.assertEqual(MANUAL_ACTIONS["captions"], ("captions", "gpu"))
         self.assertEqual(MANUAL_ACTIONS["sound_design"], ("sound_design", "cpu"))
-        self.assertEqual(MANUAL_ACTIONS["visual_qa"], ("visual_qa", "gpu"))
+        self.assertEqual(MANUAL_ACTIONS["visual_qa"], ("visual_qa", "network"))
         self.assertEqual(MANUAL_ACTIONS["opencut_export"], ("opencut_export", "io"))
         self.assertEqual(MANUAL_ACTIONS["render_final"], ("render_final", "gpu"))
+
+    def test_manual_action_dependencies_protect_pipeline_order(self) -> None:
+        self.assertEqual(ACTION_META["tts"]["requires"], ())
+        self.assertEqual(ACTION_META["captions"]["requires"], ("tts",))
+        self.assertEqual(ACTION_META["sound_design"]["requires"], ("tts",))
+        self.assertEqual(ACTION_META["visual_qa"]["requires"], ("active_images",))
+        self.assertEqual(
+            ACTION_META["opencut_export"]["requires"],
+            ("active_images", "tts", "captions", "sound_design"),
+        )
+        self.assertEqual(
+            ACTION_META["render_final"]["requires"],
+            ("active_images", "tts", "captions", "sound_design", "scene_review"),
+        )
 
 
 if __name__ == "__main__":
