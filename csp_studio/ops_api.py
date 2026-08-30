@@ -9,11 +9,11 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from .action_api import router as action_router, run_quick_regenerate
+from .action_api import run_quick_regenerate
 from .agent_one import AgentOne
 from .store import StudioStore
 from .task_engine import StudioTask, TaskEngine
-from .task_runner import run_task
+from .task_runner import run_task_waiting
 from .universe_memory import UniverseMemory
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +21,6 @@ OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 
 router = APIRouter()
-router.include_router(action_router)
 
 PLACEHOLDER_NOTES = {
     ("specific issue", "specific fix"),
@@ -105,7 +104,12 @@ def _schedule(background_tasks: BackgroundTasks, task: StudioTask) -> None:
     if task.stage == "regenerate_image_quick":
         background_tasks.add_task(run_quick_regenerate, task.task_id)
     else:
-        background_tasks.add_task(run_task, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
+        background_tasks.add_task(
+            run_task_waiting,
+            task.task_id,
+            db_path=DB_PATH,
+            output_root=OUTPUT_ROOT,
+        )
 
 
 @router.get("/api/projects/{project_id}/ops-dashboard")
