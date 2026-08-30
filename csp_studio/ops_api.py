@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .action_api import action_statuses, run_quick_regenerate
 from .agent_one import AgentOne
+from .comfy_control import interrupt_comfyui
 from .log_safety import DEFAULT_LOG_TAIL_BYTES, read_redacted_log_tail
 from .store import StudioStore
 from .task_engine import StudioTask, TaskEngine
@@ -210,8 +211,23 @@ def retry_task(task_id: str, background_tasks: BackgroundTasks):
 def cancel_task(task_id: str):
     with StudioStore(DB_PATH) as store:
         engine = TaskEngine(store)
+        current = engine.get(task_id)
+        if current is None:
+            raise HTTPException(404, f"Unknown task: {task_id}")
+        should_interrupt_comfy = (
+            current.state == "running"
+            and current.stage in {"regenerate_image", "regenerate_image_quick"}
+        )
         try:
             task = engine.cancel(task_id)
         except (KeyError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
-        return {"cancelled": True, "task": task.to_dict()}
+
+    comfy_interrupt = None
+    if should_interrupt_comfy:
+        comfy_interrupt = interrupt_comfyui()
+    return {
+        "cancelled": True,
+        "task": task.to_dict(),
+        "comfy_interrupt": comfy_interrupt,
+    }
