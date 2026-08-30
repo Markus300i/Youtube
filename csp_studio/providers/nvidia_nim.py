@@ -13,12 +13,15 @@ from .base import ProviderError, ProviderResponse
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_CHAT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 DEFAULT_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
-DEFAULT_EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
+DEFAULT_EMBED_MODEL = "nvidia/nemotron-3-embed-1b"
 DEFAULT_TIMEOUT = 90.0
 DEFAULT_VISION_TIMEOUT = 120.0
 DEFAULT_VISION_RETRIES = 0
 RETIRED_CHAT_MODELS = {
     "nvidia/llama-3.3-nemotron-super-49b-v1.5": DEFAULT_CHAT_MODEL,
+}
+RETIRED_EMBED_MODELS = {
+    "nvidia/nv-embedqa-e5-v5": DEFAULT_EMBED_MODEL,
 }
 
 
@@ -67,6 +70,11 @@ def _migrate_retired_chat_model(value: str) -> str:
     return RETIRED_CHAT_MODELS.get(cleaned, cleaned)
 
 
+def _migrate_retired_embed_model(value: str) -> str:
+    cleaned = value.strip()
+    return RETIRED_EMBED_MODELS.get(cleaned, cleaned)
+
+
 class NvidiaNimProvider:
     name = "nvidia_nim"
 
@@ -87,7 +95,9 @@ class NvidiaNimProvider:
         self.base_url = (base_url or os.getenv("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
         self.chat_model = _migrate_retired_chat_model(chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL)
         self.vision_model = (vision_model or os.getenv("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL).strip()
-        self.embed_model = (embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL).strip()
+        self.embed_model = _migrate_retired_embed_model(
+            embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL
+        )
         self.timeout = float(timeout if timeout is not None else _env_float("CSP_NIM_TIMEOUT", DEFAULT_TIMEOUT))
         self.vision_timeout = float(
             vision_timeout if vision_timeout is not None else _env_float("CSP_NIM_VISION_TIMEOUT", DEFAULT_VISION_TIMEOUT)
@@ -242,7 +252,7 @@ class NvidiaNimProvider:
         items = [str(text) for text in texts]
         if not items:
             return []
-        selected_model = model or self.embed_model
+        selected_model = _migrate_retired_embed_model(model or self.embed_model)
         data = self._post(
             "embeddings",
             {
