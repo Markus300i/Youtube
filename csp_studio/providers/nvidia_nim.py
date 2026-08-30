@@ -11,12 +11,15 @@ import httpx
 from .base import ProviderError, ProviderResponse
 
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_CHAT_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+DEFAULT_CHAT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 DEFAULT_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
 DEFAULT_EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
 DEFAULT_TIMEOUT = 90.0
 DEFAULT_VISION_TIMEOUT = 120.0
 DEFAULT_VISION_RETRIES = 0
+RETIRED_CHAT_MODELS = {
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5": DEFAULT_CHAT_MODEL,
+}
 
 
 def _clean_api_key(value: str | None) -> str | None:
@@ -59,6 +62,11 @@ def _env_int(name: str, default: int) -> int:
     return value
 
 
+def _migrate_retired_chat_model(value: str) -> str:
+    cleaned = value.strip()
+    return RETIRED_CHAT_MODELS.get(cleaned, cleaned)
+
+
 class NvidiaNimProvider:
     name = "nvidia_nim"
 
@@ -77,7 +85,7 @@ class NvidiaNimProvider:
     ) -> None:
         self.api_key = _clean_api_key(api_key if api_key is not None else os.getenv("NVIDIA_API_KEY"))
         self.base_url = (base_url or os.getenv("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
-        self.chat_model = (chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL).strip()
+        self.chat_model = _migrate_retired_chat_model(chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL)
         self.vision_model = (vision_model or os.getenv("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL).strip()
         self.embed_model = (embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL).strip()
         self.timeout = float(timeout if timeout is not None else _env_float("CSP_NIM_TIMEOUT", DEFAULT_TIMEOUT))
@@ -161,7 +169,7 @@ class NvidiaNimProvider:
         request_timeout: float | None = None,
         retries: int = 0,
     ) -> ProviderResponse:
-        selected_model = model or self.chat_model
+        selected_model = _migrate_retired_chat_model(model or self.chat_model)
         payload = {
             "model": selected_model,
             "messages": list(messages),
