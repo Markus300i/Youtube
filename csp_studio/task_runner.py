@@ -139,13 +139,35 @@ class StudioTaskRunner:
     ) -> dict[str, Any]:
         if snapshot is None:
             raise RuntimeError("Missing project snapshot")
+
+        base_env = self._base_env()
+        if os.name == "nt":
+            ensure_script = ROOT / "setup" / "ensure-comfyui.ps1"
+            if not ensure_script.is_file():
+                raise FileNotFoundError(ensure_script)
+            ensure_command = [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(ensure_script),
+            ]
+            with StudioStore(self.db_path) as store:
+                TaskEngine(store).progress(task_id, 10, stage="ensure_comfyui")
+            ensure_returncode = self._run_process(task_id, ensure_command, log_path, env=base_env)
+            if ensure_returncode != 0:
+                raise RuntimeError(
+                    "ComfyUI could not be started. Start it manually or set CSP_COMFYUI_PATH / CSP_COMFY_PYTHON."
+                )
+
         with tempfile.TemporaryDirectory(prefix="csp-studio-regen-") as tmp:
             temp_output = Path(tmp) / "output"
-            env = self._base_env()
+            env = dict(base_env)
             env["CSP_OUTPUT_DIR"] = str(temp_output)
             command = [self.python, str(ROOT / "scripts" / "generate_scene.py"), str(snapshot), str(scene_id)]
             with StudioStore(self.db_path) as store:
-                TaskEngine(store).progress(task_id, 15, stage="generate_image")
+                TaskEngine(store).progress(task_id, 20, stage="generate_image")
             returncode = self._run_process(task_id, command, log_path, env=env)
             if returncode != 0:
                 raise RuntimeError(f"Scene generator exited with code {returncode}")
@@ -224,7 +246,8 @@ class StudioTaskRunner:
 
     def _run_process(self, task_id: str, command: list[str], log_path: Path, *, env: dict[str, str]) -> int:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("w", encoding="utf-8", errors="replace") as log:
+        with log_path.open("a", encoding="utf-8", errors="replace") as log:
+            log.write("\n" + "=" * 72 + "\n")
             log.write("COMMAND: " + self._display_command(command) + "\n\n")
             log.flush()
             process = subprocess.Popen(
