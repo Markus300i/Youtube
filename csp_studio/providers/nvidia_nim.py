@@ -16,6 +16,20 @@ DEFAULT_VISION_MODEL = "meta/muse-glimmer-30b"
 DEFAULT_EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
 
 
+def _clean_api_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if any(char.isspace() for char in cleaned):
+        raise ProviderError(
+            "NVIDIA_API_KEY contains whitespace inside the key. "
+            "Set the environment variable again with the raw key only."
+        )
+    return cleaned
+
+
 class NvidiaNimProvider:
     name = "nvidia_nim"
 
@@ -30,11 +44,11 @@ class NvidiaNimProvider:
         timeout: float = 90.0,
         client: httpx.Client | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
-        self.base_url = (base_url or os.getenv("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-        self.chat_model = chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL
-        self.vision_model = vision_model or os.getenv("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL
-        self.embed_model = embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL
+        self.api_key = _clean_api_key(api_key if api_key is not None else os.getenv("NVIDIA_API_KEY"))
+        self.base_url = (base_url or os.getenv("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
+        self.chat_model = (chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL).strip()
+        self.vision_model = (vision_model or os.getenv("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL).strip()
+        self.embed_model = (embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL).strip()
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
 
