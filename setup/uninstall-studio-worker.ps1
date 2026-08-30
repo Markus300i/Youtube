@@ -1,18 +1,20 @@
 param(
-    [string]$TaskName = "CSP Studio Worker"
+    [string]$TaskName = "CSP Studio Worker",
+    [string]$WatchdogTaskName = "CSP Studio Worker Watchdog"
 )
 
 $ErrorActionPreference = "Stop"
 
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($null -eq $task) {
-    Write-Host "Scheduled task not installed: $TaskName"
-    exit 0
+foreach ($name in @($WatchdogTaskName, $TaskName)) {
+    $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
+        Write-Host "Scheduled task not installed: $name"
+        continue
+    }
+    if ($task.State -eq "Running") {
+        Stop-ScheduledTask -InputObject $task
+        Start-Sleep -Milliseconds 300
+    }
+    Unregister-ScheduledTask -TaskName $name -Confirm:$false
+    Write-Host "Uninstalled scheduled task: $name"
 }
-
-if ($task.State -eq "Running") {
-    Stop-ScheduledTask -InputObject $task
-    Start-Sleep -Milliseconds 500
-}
-Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-Write-Host "Uninstalled scheduled task: $TaskName"
