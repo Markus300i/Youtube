@@ -9,7 +9,7 @@ from PIL import Image
 
 from csp_studio.asset_manager import AssetManager
 from csp_studio.import_short import project_from_short
-from csp_studio.providers.base import ProviderResponse
+from csp_studio.providers.base import ProviderError, ProviderResponse
 from csp_studio.store import StudioStore
 from csp_studio.visual_qa import VisualQA
 
@@ -17,15 +17,62 @@ from csp_studio.visual_qa import VisualQA
 class FakeVisionProvider:
     name = "fake_vision"
 
-    def __init__(self, text: str):
-        self.text = text
-        self.prompt = None
-        self.image_paths = None
+    def __init__(
+        self,
+        *,
+        empty_scene: int | None = None,
+        invalid_aggregate: bool = False,
+        aggregate_error: bool = False,
+        missing_score: bool = False,
+        empty_note: bool = False,
+    ):
+        self.image_calls: list[dict] = []
+        self.chat_calls: list[dict] = []
+        self.empty_scene = empty_scene
+        self.invalid_aggregate = invalid_aggregate
+        self.aggregate_error = aggregate_error
+        self.missing_score = missing_score
+        self.empty_note = empty_note
 
     def analyze_images(self, prompt, image_paths, *, model=None, temperature=0.1, max_tokens=1600):
-        self.prompt = prompt
-        self.image_paths = list(image_paths)
-        return ProviderResponse(provider=self.name, model="fake-vlm", text=self.text)
+        paths = list(image_paths)
+        self.image_calls.append({"prompt": prompt, "paths": paths, "max_tokens": max_tokens})
+        scene_id = int(Path(paths[0]).stem.split("-")[1])
+        if self.empty_scene == scene_id:
+            return ProviderResponse(provider=self.name, model="fake-vlm", text="")
+        text = (
+            f"Scene {scene_id}: medium documentary framing in a basement. "
+            f"Dominant subject is subject-{scene_id}. Dark door remains a useful continuity cue. "
+            "Image is readable on mobile and broadly supports the narration."
+        )
+        return ProviderResponse(provider=self.name, model="fake-vlm", text=text)
+
+    def chat(self, messages, *, model=None, temperature=0.1, max_tokens=1200):
+        self.chat_calls.append({"messages": messages, "max_tokens": max_tokens})
+        if self.aggregate_error:
+            raise ProviderError("NVIDIA NIM HTTP 410: retired model")
+        if self.invalid_aggregate:
+            return ProviderResponse(provider=self.name, model="fake-text", text="plain prose, not json")
+        payload = {
+            "score": 74,
+            "summary": "Good continuity but scenes 3 and 4 repeat framing.",
+            "warnings": ["Scene 4 repeats Scene 3."],
+            "continuity": ["Door appearance remains stable."],
+            "monotony": ["Scenes 3 and 4 share similar framing."],
+            "scene_notes": [
+                {
+                    "scene_id": 4,
+                    "severity": "warning",
+                    "issue": "Framing repeats Scene 3.",
+                    "recommendation": "Use POV or detail framing.",
+                }
+            ],
+        }
+        if self.missing_score:
+            payload.pop("score")
+        if self.empty_note:
+            payload["scene_notes"] = [{"scene_id": 1, "severity": "warning", "issue": "", "recommendation": ""}]
+        return ProviderResponse(provider=self.name, model="fake-text", text=json.dumps(payload))
 
 
 class VisualQATests(unittest.TestCase):
@@ -56,23 +103,8 @@ class VisualQATests(unittest.TestCase):
             Image.new("RGB", (1080, 1920), (index * 20, index * 20, index * 20)).save(path)
             manager.register_asset("001", index, path, source="gpt-browser-manual")
 
-    def test_visual_qa_sends_eight_thumbnails_and_persists_report_checkpoint(self):
-        payload = {
-            "score": 74,
-            "summary": "Good continuity but the middle repeats the same frontal framing.",
-            "warnings": ["Scenes 3-5 are too similar."],
-            "continuity": ["Door orientation is stable."],
-            "monotony": ["Three consecutive frontal door shots."],
-            "scene_notes": [
-                {
-                    "scene_id": 4,
-                    "severity": "warning",
-                    "issue": "Framing repeats Scene 3.",
-                    "recommendation": "Use POV or detail framing.",
-                }
-            ],
-        }
-        provider = FakeVisionProvider(json.dumps(payload))
+    def test_visual_qa_uses_plain_text_scene_reviews_then_text_aggregation(self):
+        provider = FakeVisionProvider()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             project_dir = root / "001-drzwi-0"
@@ -83,31 +115,30 @@ class VisualQATests(unittest.TestCase):
                 report, report_path = qa.run("001", provider)
 
                 self.assertEqual(report.score, 74)
-                self.assertEqual(report.provider, "fake_vision")
-                self.assertEqual(report.model, "fake-vlm")
-                self.assertEqual(report.scene_notes[0].scene_id, 4)
-                self.assertEqual(len(provider.image_paths), 8)
-                self.assertIn("IN THAT ORDER", provider.prompt)
-                self.assertIn("Narracja sceny 4", provider.prompt)
+                self.assertEqual(report.strategy, "single_scene_prose_v2")
+                self.assertEqual(report.aggregate_status, "complete")
+                self.assertEqual(len(provider.image_calls), 8)
+                self.assertEqual(len(provider.chat_calls), 1)
+                self.assertTrue(all(len(call["paths"]) == 1 for call in provider.image_calls))
+                self.assertTrue(all(call["max_tokens"] == 420 for call in provider.image_calls))
+                self.assertIn("Do not output JSON", provider.image_calls[0]["prompt"])
 
-                for path_str in provider.image_paths:
-                    path = Path(path_str)
-                    self.assertTrue(path.is_file())
-                    self.assertEqual(path.suffix.lower(), ".jpg")
-                    with Image.open(path) as image:
-                        self.assertLessEqual(image.width, 432)
-                        self.assertLessEqual(image.height, 768)
-
-                self.assertTrue(report_path.is_file())
                 saved = json.loads(report_path.read_text(encoding="utf-8"))
                 self.assertEqual(saved["score"], 74)
-                checkpoint = qa.tasks.get_checkpoint("001", "visual_qa")
-                self.assertEqual(checkpoint["state"], "done")
-                self.assertEqual(checkpoint["metadata"]["score"], 74)
-                self.assertTrue(qa.tasks.checkpoint_is_usable("001", "visual_qa"))
+                self.assertEqual(saved["aggregate_status"], "complete")
+                debug = json.loads((project_dir / "qa" / "aggregate-response.json").read_text(encoding="utf-8"))
+                self.assertEqual(debug["model"], "fake-text")
+                self.assertTrue(debug["text"])
 
-    def test_invalid_provider_json_marks_checkpoint_failed(self):
-        provider = FakeVisionProvider("not json at all")
+                for scene_id in range(1, 9):
+                    scene_file = project_dir / "qa" / "scenes" / f"scene-{scene_id:02d}.json"
+                    scene_data = json.loads(scene_file.read_text(encoding="utf-8"))
+                    self.assertTrue(scene_data["review_text"])
+                    checkpoint = qa.tasks.get_checkpoint("001", f"visual_qa_scene_{scene_id:02d}")
+                    self.assertEqual(checkpoint["state"], "done")
+
+    def test_completed_scenes_resume_after_empty_later_scene(self):
+        provider = FakeVisionProvider(empty_scene=5)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             project_dir = root / "001-drzwi-0"
@@ -117,9 +148,73 @@ class VisualQATests(unittest.TestCase):
                 qa = VisualQA(store, output_root=root)
                 with self.assertRaises(Exception):
                     qa.run("001", provider)
-                checkpoint = qa.tasks.get_checkpoint("001", "visual_qa")
-                self.assertEqual(checkpoint["state"], "failed")
-                self.assertIn("error", checkpoint["metadata"])
+                self.assertEqual(len(provider.image_calls), 5)
+                for scene_id in range(1, 5):
+                    self.assertEqual(qa.tasks.get_checkpoint("001", f"visual_qa_scene_{scene_id:02d}")["state"], "done")
+
+                provider.empty_scene = None
+                provider.image_calls.clear()
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.score, 74)
+                self.assertEqual(len(provider.image_calls), 4)
+
+    def test_invalid_aggregate_falls_back_instead_of_failing_visual_qa(self):
+        provider = FakeVisionProvider(invalid_aggregate=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "001-drzwi-0"
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project())
+                self._attach_images(store, project_dir)
+                qa = VisualQA(store, output_root=root)
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "fallback")
+                self.assertEqual(report.score, 100)
+                self.assertIn("Structured aggregate unavailable", report.summary)
+                self.assertEqual(qa.tasks.get_checkpoint("001", "visual_qa")["state"], "done")
+
+    def test_aggregate_http_failure_falls_back_instead_of_failing_visual_qa(self):
+        provider = FakeVisionProvider(aggregate_error=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "001-drzwi-0"
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project())
+                self._attach_images(store, project_dir)
+                qa = VisualQA(store, output_root=root)
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "fallback")
+                self.assertEqual(report.score, 100)
+                self.assertTrue(any("410" in warning for warning in report.warnings))
+                debug = json.loads((project_dir / "qa" / "aggregate-response.json").read_text(encoding="utf-8"))
+                self.assertIn("410", debug["error"])
+
+    def test_json_missing_score_uses_fallback_not_silent_zero(self):
+        provider = FakeVisionProvider(missing_score=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "001-drzwi-0"
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project())
+                self._attach_images(store, project_dir)
+                qa = VisualQA(store, output_root=root)
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "fallback")
+                self.assertEqual(report.score, 100)
+                self.assertTrue(any("missing required fields" in warning for warning in report.warnings))
+
+    def test_empty_scene_note_is_dropped(self):
+        provider = FakeVisionProvider(empty_note=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "001-drzwi-0"
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project())
+                self._attach_images(store, project_dir)
+                qa = VisualQA(store, output_root=root)
+                report, _ = qa.run("001", provider)
+                self.assertEqual(report.aggregate_status, "complete")
+                self.assertEqual(report.scene_notes, [])
 
 
 if __name__ == "__main__":
