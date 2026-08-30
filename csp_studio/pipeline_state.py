@@ -40,18 +40,8 @@ def mark_done(
     )
 
 
-def is_stale(engine: TaskEngine, project_id: str, stage: str) -> bool:
-    checkpoint = engine.get_checkpoint(project_id, stage)
-    return bool(checkpoint and checkpoint.get("state") == "stale")
-
-
 def reconcile_legacy_staleness(engine: TaskEngine, project_id: str) -> None:
-    """Carry forward old image-change invalidation into downstream stages.
-
-    Earlier Studio builds marked only Visual QA stale when a scene image changed.
-    If that legacy marker is still present, preserve the causal fact before Visual QA
-    is rerun by marking OpenCut and the final render stale as well.
-    """
+    """Carry forward old image-change invalidation into downstream stages."""
 
     visual = engine.get_checkpoint(project_id, "visual_qa")
     if not visual or visual.get("state") != "stale":
@@ -68,6 +58,15 @@ def reconcile_legacy_staleness(engine: TaskEngine, project_id: str) -> None:
             "stale",
             metadata={"reason": f"reconciled from visual_qa stale: {reason}"},
         )
+
+
+def is_stale(engine: TaskEngine, project_id: str, stage: str) -> bool:
+    # This also performs the one-way legacy migration while the original
+    # visual_qa=stale fact still exists, before a new Visual QA run can replace it.
+    if stage in {"opencut_export", "render_final"}:
+        reconcile_legacy_staleness(engine, project_id)
+    checkpoint = engine.get_checkpoint(project_id, stage)
+    return bool(checkpoint and checkpoint.get("state") == "stale")
 
 
 def invalidate_after_image_change(
