@@ -9,8 +9,6 @@ from .scene_ops import SceneOperations
 from .shot_director import ShotAudit, ShotDirector
 from .store import StudioStore
 from .task_engine import StudioTask, TaskEngine
-from .universe_memory import MemoryItem, MemoryMatch, UniverseMemory
-from .visual_qa import VisualQA, VisualQAReport, VisualSceneNote
 
 __all__ = [
     "AgentOne",
@@ -37,3 +35,26 @@ __all__ = [
     "build_opencut_manifest",
     "export_opencut_manifest",
 ]
+
+
+def __getattr__(name: str):
+    # Modules that also expose a `python -m csp_studio.<module>` CLI are imported
+    # lazily. Eagerly importing them here makes runpy find the target module in
+    # sys.modules before executing it and produces a misleading RuntimeWarning.
+    if name in {"MemoryItem", "MemoryMatch", "UniverseMemory"}:
+        from .universe_memory import MemoryItem, MemoryMatch, UniverseMemory
+
+        return {
+            "MemoryItem": MemoryItem,
+            "MemoryMatch": MemoryMatch,
+            "UniverseMemory": UniverseMemory,
+        }[name]
+    if name in {"VisualQA", "VisualQAReport", "VisualSceneNote"}:
+        from .visual_qa import VisualQA, VisualQAReport, VisualSceneNote
+
+        return {
+            "VisualQA": VisualQA,
+            "VisualQAReport": VisualQAReport,
+            "VisualSceneNote": VisualSceneNote,
+        }[name]
+    raise AttributeError(name)
