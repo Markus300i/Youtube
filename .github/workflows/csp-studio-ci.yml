@@ -48,7 +48,10 @@ jobs:
             tests.test_csp_studio_worker \
             tests.test_csp_production_run \
             tests.test_csp_new_short_wizard \
-            tests.test_csp_visual_bible -v
+            tests.test_csp_visual_bible \
+            tests.test_csp_visual_bible_generation \
+            tests.test_csp_flow_api \
+            tests.test_csp_generate_scene -v
 
   frontend-syntax:
     runs-on: ubuntu-latest
@@ -62,6 +65,7 @@ jobs:
         run: |
           node --check csp_studio/web/app.js
           node --check csp_studio/web/actions.js
+          node --check csp_studio/web/flow.js
 
   powershell-syntax:
     runs-on: windows-latest
