@@ -47,7 +47,8 @@ def _resilient_wait_history(
                     )
                 if timeout_count:
                     print(
-                        f"COMFY: history API recovered after {timeout_count} transient timeout(s)"
+                        f"COMFY: history API recovered after {timeout_count} transient timeout(s)",
+                        flush=True,
                     )
                 return history
             last_error = None
@@ -57,7 +58,8 @@ def _resilient_wait_history(
             print(
                 "WARN: ComfyUI /history chwilowo nie odpowiada "
                 f"({type(exc).__name__}); generacja nadal trwa, ponawiam polling "
-                f"[{timeout_count}]"
+                f"[{timeout_count}]",
+                flush=True,
             )
 
         sleep_for = max(1, int(poll))
@@ -120,7 +122,8 @@ def _apply_visual_bible(data: dict[str, Any], scene_id: int) -> dict[str, Any]:
             if context:
                 print(
                     "VISUAL BIBLE: scene "
-                    f"{scene_id:02d} compiled with {len(ordered)} entity/entities"
+                    f"{scene_id:02d} compiled with {len(ordered)} entity/entities",
+                    flush=True,
                 )
             break
     return data
