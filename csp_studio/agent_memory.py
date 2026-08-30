@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,22 @@ from .providers import get_provider
 from .providers.base import ChatProvider, EmbeddingProvider
 from .store import StudioStore
 from .universe_memory import UniverseMemory
+
+
+_REASONING_MARKERS = (
+    "here's a thinking process",
+    "thinking process:",
+    "analysis:",
+    "reasoning:",
+    "step-by-step reasoning",
+)
+_FINAL_MARKERS = (
+    "raport stanu produkcji",
+    "**stan:**",
+    "stan:",
+    "final answer:",
+    "final:",
+)
 
 
 class AgentOneMemoryAdvisor:
@@ -72,6 +89,51 @@ class AgentOneMemoryAdvisor:
                 break
         return output
 
+    @staticmethod
+    def _fallback_text(report: dict[str, Any], memory_context: dict[str, Any]) -> str:
+        blockers = report.get("blockers") or []
+        blocker_text = "; ".join(str(item.get("detail") or item.get("label") or "") for item in blockers if isinstance(item, dict))
+        if not blocker_text:
+            blocker_text = "Brak blokujących bramek w zweryfikowanym stanie."
+        matches = memory_context.get("matches") or []
+        memory_line = (
+            f"Pamięć znalazła {len(matches)} podobnych wpisów; traktuj je wyłącznie jako kontekst doradczy."
+            if matches
+            else "Brak porównania z wcześniejszymi projektami."
+        )
+        return (
+            f"Stan: etap {report.get('stage')}; final_ready={str(bool(report.get('final_ready'))).lower()}. "
+            f"{blocker_text}\n"
+            f"Najbliższy krok: {report.get('next_action')} — {report.get('next_action_detail')}\n"
+            f"Uwagi z pamięci: {memory_line}"
+        )
+
+    @classmethod
+    def _sanitize_advisor_text(
+        cls,
+        text: str,
+        report: dict[str, Any],
+        memory_context: dict[str, Any],
+    ) -> str:
+        value = str(text or "").strip()
+        if not value:
+            return cls._fallback_text(report, memory_context)
+        lowered = value.lower()
+        if not any(marker in lowered[:500] for marker in _REASONING_MARKERS):
+            return value
+
+        best_index: int | None = None
+        for marker in _FINAL_MARKERS:
+            index = lowered.rfind(marker)
+            if index >= 0 and (best_index is None or index > best_index):
+                best_index = index
+        if best_index is not None:
+            candidate = value[best_index:].strip()
+            candidate = re.sub(r"^(?:final answer|final)\s*:\s*", "", candidate, flags=re.IGNORECASE).strip()
+            if candidate and not any(marker in candidate.lower()[:200] for marker in _REASONING_MARKERS):
+                return candidate
+        return cls._fallback_text(report, memory_context)
+
     def advise(
         self,
         project_id: str,
@@ -99,10 +161,12 @@ class AgentOneMemoryAdvisor:
         }
         prompt = (
             "Jesteś Agent One dla fikcyjnego kanału Ciemna Strona Polski. "
-            "Najpierw respektuj deterministyczny stan produkcji. Nie wolno Ci zmieniać readiness, stage ani next_action. "
+            "Zwróć WYŁĄCZNIE gotowy raport dla operatora. Nie pokazuj analizy, toku rozumowania, planu, scratchpada, "
+            "thinking process ani wyjaśnienia krok po kroku. Nie opisuj instrukcji, które otrzymałeś. "
+            "Respektuj deterministyczny stan produkcji: nie wolno Ci zmieniać readiness, stage ani next_action. "
             "Pamięć uniwersum jest wyłącznie kontekstem doradczym: użyj jej do wskazania podobnych motywów, ryzyka powtórzeń "
-            "lub okazji do continuity. Jeśli pamięć jest pusta, powiedz krótko, że brak porównania z wcześniejszymi projektami. "
-            "Napisz krótki raport po polsku: stan, najbliższy krok, następnie 1-3 uwagi z pamięci.\n\n"
+            "lub okazji do continuity. Jeśli pamięć jest pusta, napisz: 'Brak porównania z wcześniejszymi projektami.' "
+            "Raport ma mieć tylko trzy krótkie sekcje: Stan, Najbliższy krok, Uwagi z pamięci. Maksymalnie 180 słów.\n\n"
             "ZWERYFIKOWANY STAN:\n"
             + json.dumps(safe_state, ensure_ascii=False, indent=2)
             + "\n\nPAMIĘĆ UNIWERSUM:\n"
@@ -113,22 +177,23 @@ class AgentOneMemoryAdvisor:
                 {
                     "role": "system",
                     "content": (
-                        "Jesteś operatorem produkcyjnym CSP. Fakty dostarcza deterministyczny Agent One; "
-                        "semantic memory może tylko wzbogacać rekomendacje."
+                        "Jesteś operatorem produkcyjnym CSP. Zwracaj tylko finalny raport użytkowy, bez chain-of-thought. "
+                        "Fakty dostarcza deterministyczny Agent One; semantic memory może tylko wzbogacać rekomendacje."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=900,
+            max_tokens=600,
         )
+        clean_text = self._sanitize_advisor_text(response.text, safe_state, memory_context)
         return {
             "report": safe_state,
             "memory": memory_context,
             "assistant": {
                 "provider": response.provider,
                 "model": response.model,
-                "text": response.text,
+                "text": clean_text,
                 "usage": response.usage,
             },
         }
