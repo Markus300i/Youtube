@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unicodedata
 from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
 from .scene_ops import SceneOperations
@@ -97,12 +94,10 @@ def _quick_snapshot(base_snapshot: Path, scene_id: int, target: Path) -> Path:
     if not isinstance(payload, dict):
         raise ValueError("Invalid Studio snapshot")
     payload["image_model"] = "z-image-turbo"
-    scenes = payload.get("scenes") or []
     matched = False
-    for scene in scenes:
+    for scene in payload.get("scenes") or []:
         if not isinstance(scene, dict) or int(scene.get("id", 0)) != scene_id:
             continue
-        # Quick is intentionally a fresh draft: no FLUX edit/crop dependency.
         scene["render"] = {"mode": "generate"}
         matched = True
         break
@@ -202,7 +197,7 @@ def actions_js():
 
 
 @router.post("/api/projects/{project_id}/scenes/{scene_id}/quick-regenerate")
-def quick_regenerate(project_id: str, scene_id: int):
+def quick_regenerate(project_id: str, scene_id: int, background_tasks: BackgroundTasks):
     with StudioStore(DB_PATH) as store:
         if store.get_scene(project_id, scene_id) is None:
             raise HTTPException(404, f"Unknown scene: {project_id}:{scene_id}")
@@ -213,12 +208,12 @@ def quick_regenerate(project_id: str, scene_id: int):
             resource="gpu",
             payload={"mode": "quick", "model": "z-image-turbo"},
         )
-    result = run_quick_regenerate(task.task_id)
-    return {"task": result}
+    background_tasks.add_task(run_quick_regenerate, task.task_id)
+    return {"scheduled": True, "task": task.to_dict()}
 
 
 @router.post("/api/projects/{project_id}/actions/{action}")
-def manual_action(project_id: str, action: str):
+def manual_action(project_id: str, action: str, background_tasks: BackgroundTasks):
     mapping = MANUAL_ACTIONS.get(action)
     if mapping is None:
         raise HTTPException(400, f"Unsupported manual action: {action}")
@@ -232,8 +227,5 @@ def manual_action(project_id: str, action: str):
             resource=resource,
             payload={"source": "manual-actions-panel"},
         )
-    try:
-        result = run_task(task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
-    except (KeyError, ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return {"task": result}
+    background_tasks.add_task(run_task, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
+    return {"scheduled": True, "task": task.to_dict()}
