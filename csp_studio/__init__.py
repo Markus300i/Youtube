@@ -1,6 +1,5 @@
 """CSP Studio domain layer built on top of the existing CSP Automation renderer."""
 
-from .agent_one import AgentOne, AgentOneReport, ReadinessCheck
 from .asset_manager import AssetManager
 from .models import Asset, Project, Scene, SceneRevision, ShotPlan
 from .opencut_adapter import build_manifest as build_opencut_manifest
@@ -41,6 +40,14 @@ def __getattr__(name: str):
     # Modules that also expose a `python -m csp_studio.<module>` CLI are imported
     # lazily. Eagerly importing them here makes runpy find the target module in
     # sys.modules before executing it and produces a misleading RuntimeWarning.
+    if name in {"AgentOne", "AgentOneReport", "ReadinessCheck"}:
+        from .agent_one import AgentOne, AgentOneReport, ReadinessCheck
+
+        return {
+            "AgentOne": AgentOne,
+            "AgentOneReport": AgentOneReport,
+            "ReadinessCheck": ReadinessCheck,
+        }[name]
     if name in {"MemoryItem", "MemoryMatch", "UniverseMemory"}:
         from .universe_memory import MemoryItem, MemoryMatch, UniverseMemory
 
