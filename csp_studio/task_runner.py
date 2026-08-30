@@ -6,12 +6,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from .log_safety import copy_redacted_stream, redact_sensitive_text, safe_exception_message
 from .pipeline_state import invalidate_after_image_change, invalidate_after_stage, mark_done
 from .scene_ops import SceneOperations
 from .store import StudioStore
@@ -79,10 +81,7 @@ class StudioTaskRunner:
                     return current.to_dict()
                 return engine.complete(task_id, result).to_dict()
         except Exception as exc:
-            tail = self._tail(log_path)
-            message = f"{type(exc).__name__}: {exc}"
-            if tail:
-                message += f" | log: {tail}"
+            message = safe_exception_message(exc)
             with StudioStore(self.db_path) as store:
                 engine = TaskEngine(store)
                 current = engine.get(task_id)
@@ -354,10 +353,24 @@ class StudioTaskRunner:
                 command,
                 cwd=ROOT,
                 env=env,
-                stdout=log,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
             )
+            assert process.stdout is not None
+            pump_errors: list[BaseException] = []
+
+            def pump_output() -> None:
+                try:
+                    copy_redacted_stream(process.stdout, log)
+                except BaseException as exc:  # pragma: no cover - defensive I/O boundary
+                    pump_errors.append(exc)
+
+            pump = threading.Thread(target=pump_output, name=f"task-log-{task_id}", daemon=True)
+            pump.start()
             while process.poll() is None:
                 time.sleep(0.5)
                 with StudioStore(self.db_path) as store:
@@ -368,8 +381,12 @@ class StudioTaskRunner:
                             process.wait(timeout=8)
                         except subprocess.TimeoutExpired:
                             process.kill()
-                        return int(process.returncode or -1)
-            return int(process.returncode or 0)
+                        break
+            pump.join()
+            process.stdout.close()
+            if pump_errors:
+                raise RuntimeError(f"Could not persist sanitized task output: {type(pump_errors[0]).__name__}") from pump_errors[0]
+            return int(process.returncode if process.returncode is not None else -1)
 
     def _base_env(self) -> dict[str, str]:
         env = os.environ.copy()
@@ -379,15 +396,7 @@ class StudioTaskRunner:
 
     @staticmethod
     def _display_command(command: list[str]) -> str:
-        return " ".join(str(part) for part in command)
-
-    @staticmethod
-    def _tail(path: Path, chars: int = 1800) -> str:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return ""
-        return text[-chars:].replace("\n", " | ")
+        return redact_sensitive_text(" ".join(str(part) for part in command))
 
 
 def run_task(task_id: str, *, db_path: str | Path = DEFAULT_DB_PATH, output_root: str | Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:

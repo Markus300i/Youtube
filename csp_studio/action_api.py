@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
 from .agent_one import AgentOne
+from .log_safety import copy_redacted_stream, redact_sensitive_text, safe_exception_message
 from .pipeline_state import invalidate_after_image_change
 from .scene_ops import SceneOperations
 from .store import StudioStore
@@ -69,22 +70,27 @@ def _project_title(store: StudioStore, project_id: str) -> str:
     return str(row["title"])
 
 
-def _tail(path: Path, chars: int = 1800) -> str:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-    return text[-chars:].replace("\n", " | ")
-
-
 def _run_logged(command: list[str], log_path: Path, env: dict[str, str]) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8", errors="replace") as log:
         log.write("\n" + "=" * 72 + "\n")
-        log.write("COMMAND: " + " ".join(command) + "\n\n")
+        log.write("COMMAND: " + redact_sensitive_text(" ".join(command)) + "\n\n")
         log.flush()
-        process = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
-        return int(process.returncode)
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        copy_redacted_stream(process.stdout, log)
+        process.stdout.close()
+        return int(process.wait())
 
 
 def _ensure_comfy(log_path: Path, env: dict[str, str]) -> None:
@@ -116,11 +122,12 @@ def _quick_snapshot(base_snapshot: Path, scene_id: int, target: Path) -> Path:
     return target
 
 
-def _action_statuses(store: StudioStore, project_id: str) -> list[dict[str, Any]]:
-    report = AgentOne(store, output_root=OUTPUT_ROOT).inspect(project_id)
+def action_statuses(store: StudioStore, project_id: str, *, report=None) -> list[dict[str, Any]]:
+    report = report or AgentOne(store, output_root=OUTPUT_ROOT).inspect(project_id)
     checks = {check.key: check for check in report.checks}
     engine = TaskEngine(store)
     tasks = engine.list(project_id)
+    all_tasks = engine.list()
     output: list[dict[str, Any]] = []
 
     for action, (stage, resource) in MANUAL_ACTIONS.items():
@@ -128,6 +135,10 @@ def _action_statuses(store: StudioStore, project_id: str) -> list[dict[str, Any]
         stage_tasks = [task for task in tasks if task.stage == stage]
         latest = stage_tasks[0] if stage_tasks else None
         active = next((task for task in stage_tasks if task.state in {"queued", "running"}), None)
+        checkpoint = engine.get_checkpoint(project_id, stage)
+        checkpoint_state = str(checkpoint.get("state")) if checkpoint else None
+        checkpoint_metadata = checkpoint.get("metadata") or {} if checkpoint else {}
+        freshness_reason = str(checkpoint_metadata.get("reason") or "")
         missing = [key for key in meta["requires"] if key not in checks or not checks[key].ok]
         check = checks.get(str(meta["check"]))
 
@@ -135,12 +146,43 @@ def _action_statuses(store: StudioStore, project_id: str) -> list[dict[str, Any]
             state = active.state
         elif missing:
             state = "blocked"
-        elif check is not None and check.ok:
-            state = "done"
         elif latest is not None and latest.state == "failed":
             state = "failed"
+        elif checkpoint_state == "stale":
+            state = "stale"
+        elif check is not None and check.ok:
+            state = "done"
         else:
             state = "ready"
+
+        if checkpoint_state == "stale":
+            freshness = "stale"
+        elif check is not None and check.ok:
+            freshness = "current"
+        else:
+            freshness = "not_ready"
+
+        current_step = ""
+        waiting_reason = ""
+        blocking_task = None
+        if active is not None and active.state == "running":
+            current_step = str(active.failed_stage or active.stage)
+        elif active is not None and active.state == "queued":
+            blocker = next(
+                (
+                    task
+                    for task in all_tasks
+                    if task.state == "running"
+                    and task.resource == active.resource
+                    and task.task_id != active.task_id
+                ),
+                None,
+            )
+            if blocker is not None and active.resource == "gpu":
+                blocking_task = blocker.to_dict()
+                waiting_reason = f"Czeka na GPU: {blocker.stage} ({blocker.task_id})"
+            else:
+                waiting_reason = "Oczekuje na uruchomienie workera"
 
         output.append(
             {
@@ -155,6 +197,15 @@ def _action_statuses(store: StudioStore, project_id: str) -> list[dict[str, Any]
                 "missing_requirements": missing,
                 "missing_labels": [checks[key].label if key in checks else key for key in missing],
                 "check_ok": bool(check and check.ok),
+                "check_detail": str(check.detail) if check else "",
+                "freshness": freshness,
+                "freshness_reason": freshness_reason,
+                "checkpoint_state": checkpoint_state,
+                "checkpoint_updated_at": checkpoint.get("updated_at") if checkpoint else None,
+                "active_progress": active.progress if active else None,
+                "current_step": current_step,
+                "waiting_reason": waiting_reason,
+                "blocking_task": blocking_task,
                 "latest_task": latest.to_dict() if latest else None,
                 "active_task": active.to_dict() if active else None,
             }
@@ -241,10 +292,7 @@ def run_quick_regenerate(task_id: str) -> dict[str, Any]:
                 }
                 return engine.complete(task_id, result).to_dict()
     except Exception as exc:
-        detail = f"{type(exc).__name__}: {exc}"
-        tail = _tail(log_path)
-        if tail:
-            detail += f" | log: {tail}"
+        detail = safe_exception_message(exc)
         with StudioStore(DB_PATH) as store:
             engine = TaskEngine(store)
             current = engine.get(task_id)
@@ -262,7 +310,7 @@ def actions_js():
 def action_status(project_id: str):
     with StudioStore(DB_PATH) as store:
         _project_title(store, project_id)
-        return {"project_id": project_id, "actions": _action_statuses(store, project_id)}
+        return {"project_id": project_id, "actions": action_statuses(store, project_id)}
 
 
 @router.post("/api/projects/{project_id}/scenes/{scene_id}/quick-regenerate")
@@ -302,7 +350,7 @@ def manual_action(project_id: str, action: str, background_tasks: BackgroundTask
 
     with StudioStore(DB_PATH) as store:
         _project_title(store, project_id)
-        statuses = {item["action"]: item for item in _action_statuses(store, project_id)}
+        statuses = {item["action"]: item for item in action_statuses(store, project_id)}
         status = statuses[action]
         if status["missing_requirements"]:
             raise HTTPException(409, "Brak wymaganych etapów: " + ", ".join(status["missing_labels"]))

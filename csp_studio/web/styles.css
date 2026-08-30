@@ -217,6 +217,17 @@ select:focus, input:focus, textarea:focus { outline: 1px solid #66666e; border-c
 .visual-qa-summary { display: flex; gap: 18px; align-items: baseline; }
 .visual-qa-summary strong { font-size: 28px; }
 .compact-list { margin: 10px 0 0; padding-left: 18px; color: #d0d0d4; line-height: 1.5; }
+.pipeline-list { margin-top: 12px; display: grid; gap: 8px; }
+.pipeline-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+.pipeline-row:first-child { border-top: 0; }
+.pipeline-reason { color: var(--warn); font-size: 12px; margin-top: 4px; }
+.pipeline-meta { display: grid; justify-items: end; gap: 5px; }
+.pipeline-meta small { color: var(--muted); }
+.pipeline-state { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; letter-spacing: .06em; }
+.pipeline-state.done { color: var(--good); border-color: #2f6b4e; }
+.pipeline-state.stale, .pipeline-state.blocked, .pipeline-state.queued, .pipeline-state.running { color: var(--warn); border-color: #6e5a2b; }
+.pipeline-state.failed { color: var(--bad); border-color: #744545; }
+.pipeline-state.ready { color: #a9c7ff; border-color: #40567c; }
 
 .tasks-view { max-width: 1200px; margin: 0 auto; }
 .task-list { display: grid; gap: 10px; }
@@ -226,11 +237,14 @@ select:focus, input:focus, textarea:focus { outline: 1px solid #66666e; border-c
 .task-state.failed { color: var(--bad); border-color: #744545; }
 .task-state.running, .task-state.queued { color: var(--warn); border-color: #6e5a2b; }
 .task-error { color: var(--bad); font-size: 12px; margin-top: 5px; }
+.task-step { color: #a9c7ff; font-size: 12px; margin-top: 5px; }
+.task-timing { font-size: 11px; margin-top: 4px; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .task-progress { text-align: right; }
 .progress-track { height: 5px; margin-top: 6px; border-radius: 999px; overflow: hidden; background: #222228; }
 .progress-track span { display: block; height: 100%; background: #a0a0a8; }
 
-#historyDialog {
+#historyDialog, #taskLogDialog {
   width: min(820px, calc(100vw - 40px));
   max-height: 82vh;
   border: 1px solid var(--line);
@@ -239,11 +253,26 @@ select:focus, input:focus, textarea:focus { outline: 1px solid #66666e; border-c
   background: #111113;
   color: var(--text);
 }
-#historyDialog::backdrop { background: rgba(0,0,0,.68); }
+#historyDialog::backdrop, #taskLogDialog::backdrop { background: rgba(0,0,0,.68); }
 .dialog-head { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.dialog-actions { display: flex; gap: 8px; }
 .history-entry { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: var(--panel); }
 .history-entry strong { display: block; margin-bottom: 5px; }
 .history-entry code { color: #c8c8ce; word-break: break-all; }
+.task-log-note { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.task-log-output {
+  max-height: 60vh;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #09090b;
+  color: #d8d8dc;
+  font: 12px/1.5 Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .toast {
   position: fixed;
@@ -280,4 +309,6 @@ select:focus, input:focus, textarea:focus { outline: 1px solid #66666e; border-c
   .dashboard-head { align-items: flex-start; flex-direction: column; }
   .task-row { grid-template-columns: 1fr; }
   .task-progress { text-align: left; }
+  .pipeline-row { grid-template-columns: 1fr; }
+  .pipeline-meta { justify-items: start; }
 }

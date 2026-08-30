@@ -8,6 +8,7 @@ const state = {
   view: "dashboard",
   pollTimer: null,
   polling: false,
+  taskLogTaskId: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,8 @@ const historyDialog = $("historyDialog");
 const historyContent = $("historyContent");
 const opsDashboard = $("opsDashboard");
 const taskPanel = $("taskPanel");
+const taskLogDialog = $("taskLogDialog");
+const taskLogContent = $("taskLogContent");
 
 const SHOT_TYPES = ["wide", "medium", "close_up", "detail", "pov", "over_shoulder", "reveal", "twist"];
 const CAMERA_TYPES = ["static", "slow_push", "slow_pull", "push_in", "pan_left", "pan_right", "micro_handheld"];
@@ -134,6 +137,7 @@ function renderDashboard() {
   const review = ops.review;
   const vqa = ops.visual_qa || {};
   const memory = ops.memory || {};
+  const pipeline = ops.pipeline || [];
   const checks = agent.checks || [];
   const blocking = (agent.blockers || []).length;
   const nextButtonLabel = agent.next_action === "review_scenes" ? "Przejdź do review" : "Uruchom następny krok";
@@ -181,6 +185,25 @@ function renderDashboard() {
               <span class="readiness-dot"></span>
               <div><strong>${escapeHtml(check.label)}</strong><div class="muted">${escapeHtml(check.detail)}</div></div>
               <span>${check.ok ? "OK" : (check.blocking ? "BLOCK" : "WARN")}</span>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+
+      <section class="ops-card full-span">
+        <div class="eyebrow">PIPELINE FRESHNESS</div>
+        <div class="pipeline-list">
+          ${pipeline.map(item => `
+            <div class="pipeline-row">
+              <div>
+                <strong>${escapeHtml(item.label)}</strong>
+                <div class="muted">${escapeHtml(item.check_detail || item.detail)}</div>
+                ${item.freshness_reason ? `<div class="pipeline-reason">${escapeHtml(item.freshness_reason)}</div>` : ""}
+              </div>
+              <div class="pipeline-meta">
+                <span class="pipeline-state ${escapeHtml(item.state)}">${escapeHtml(String(item.state).toUpperCase())}</span>
+                <small>${item.checkpoint_updated_at ? escapeHtml(item.checkpoint_updated_at) : "brak checkpointu"}</small>
+              </div>
             </div>
           `).join("")}
         </div>
@@ -261,9 +284,14 @@ function renderTasks() {
       <div class="task-main">
         <div><strong>${escapeHtml(task.stage)}</strong> <span class="task-state ${escapeHtml(task.state)}">${escapeHtml(task.state)}</span></div>
         <div class="muted">${escapeHtml(task.task_id)} · ${escapeHtml(task.resource)}${task.scene_id ? ` · scene ${task.scene_id}` : ""}</div>
+        ${task.failed_stage ? `<div class="task-step">${task.state === "failed" ? "Błąd na etapie" : "Bieżący krok"}: ${escapeHtml(task.failed_stage)}</div>` : ""}
+        <div class="muted task-timing">Utworzono: ${escapeHtml(task.created_at)}${task.started_at ? ` · Start: ${escapeHtml(task.started_at)}` : ""}</div>
         ${task.error ? `<div class="task-error">${escapeHtml(task.error)}</div>` : ""}
         ${task.result?.log_path ? `<div class="muted">Log: ${escapeHtml(task.result.log_path)}</div>` : ""}
-        <div class="task-actions">${taskButtons(task)}</div>
+        <div class="task-actions">
+          ${taskButtons(task)}
+          <button class="ghost task-log-button" data-task="${escapeHtml(task.task_id)}">Pokaż log</button>
+        </div>
       </div>
       <div class="task-progress"><strong>${task.progress}%</strong><div class="progress-track"><span style="width:${Math.max(0, Math.min(100, task.progress))}%"></span></div></div>
     </article>
@@ -272,6 +300,36 @@ function renderTasks() {
   document.querySelectorAll(".task-action").forEach(button => {
     button.addEventListener("click", () => taskAction(button.dataset.task, button.dataset.action));
   });
+  document.querySelectorAll(".task-log-button").forEach(button => {
+    button.addEventListener("click", () => openTaskLog(button.dataset.task));
+  });
+}
+
+async function refreshTaskLog() {
+  const taskId = state.taskLogTaskId;
+  if (!taskId) return;
+  taskLogContent.innerHTML = `<div class="empty-state">Ładowanie logu…</div>`;
+  try {
+    const data = await api(`/api/tasks/${encodeURIComponent(taskId)}/log`);
+    $("taskLogTitle").textContent = `${data.stage} · ${data.state}`;
+    if (!data.available) {
+      taskLogContent.innerHTML = `<div class="empty-state">Log nie jest jeszcze dostępny.</div>`;
+      return;
+    }
+    const truncation = data.truncated
+      ? `<div class="task-log-note">Pokazano ostatnie ${Math.round(data.max_bytes / 1024)} KiB z ${data.size_bytes} bajtów.</div>`
+      : `<div class="task-log-note">${data.size_bytes} bajtów · sekrety są maskowane</div>`;
+    taskLogContent.innerHTML = `${truncation}<pre class="task-log-output">${escapeHtml(data.content || "Log jest pusty.")}</pre>`;
+  } catch (err) {
+    taskLogContent.innerHTML = `<div class="task-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function openTaskLog(taskId) {
+  state.taskLogTaskId = taskId;
+  $("taskLogTitle").textContent = taskId;
+  taskLogDialog.showModal();
+  await refreshTaskLog();
 }
 
 async function taskAction(taskId, action) {
@@ -518,6 +576,11 @@ projectSelect.addEventListener("change", async () => {
 });
 $("refreshBtn").addEventListener("click", () => loadProjects().catch(err => alert(err.message)));
 $("closeHistory").addEventListener("click", () => historyDialog.close());
+$("refreshTaskLog").addEventListener("click", refreshTaskLog);
+$("closeTaskLog").addEventListener("click", () => {
+  taskLogDialog.close();
+  state.taskLogTaskId = null;
+});
 document.querySelectorAll(".view-tab").forEach(btn => btn.addEventListener("click", () => switchView(btn.dataset.view)));
 
 loadProjects().catch(err => {

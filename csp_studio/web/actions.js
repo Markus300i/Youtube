@@ -5,12 +5,14 @@
     .manual-action-btn { text-align:left; min-height:92px; display:grid; grid-template-columns:1fr auto; gap:5px 8px; align-items:start; }
     .manual-action-btn strong { color:var(--text); }
     .manual-action-btn .action-detail { color:var(--muted); font-size:11px; grid-column:1 / -1; }
+    .manual-action-btn .action-activity { color:#a9c7ff; font-size:11px; grid-column:1 / -1; }
     .manual-action-btn .action-blocker { color:var(--warn); font-size:11px; grid-column:1 / -1; }
     .manual-action-btn:disabled { cursor:not-allowed; opacity:.58; }
     .action-state { font-size:9px; letter-spacing:.08em; padding:3px 6px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
     .action-state.done { color:var(--good); border-color:#2f6b4e; }
     .action-state.ready { color:#a9c7ff; border-color:#40567c; }
     .action-state.blocked { color:var(--warn); border-color:#6e5a2b; }
+    .action-state.stale { color:var(--warn); border-color:#6e5a2b; }
     .action-state.failed { color:var(--bad); border-color:#744545; }
     .action-state.running, .action-state.queued { color:var(--warn); border-color:#6e5a2b; }
     #quickRegenBtn { border-color:#40567c; color:#a9c7ff; }
@@ -82,12 +84,23 @@
   function actionButtonHtml(item) {
     const blocked = (item.missing_labels || []).join(", ");
     const disabled = !item.can_run;
-    const stateLabel = String(item.state || "ready").toUpperCase();
+    const progress = item.active_progress;
+    const stateLabel = item.state === "running" && progress !== null
+      ? `RUNNING ${progress}%`
+      : String(item.state || "ready").toUpperCase();
+    const activity = item.current_step
+      ? `Bieżący krok: ${item.current_step}`
+      : (item.waiting_reason || "");
+    const freshness = item.freshness_reason && item.state === "stale"
+      ? `Nieaktualne: ${item.freshness_reason}`
+      : "";
     return `
       <button class="ghost manual-action-btn" data-manual-action="${item.action}" data-label="${item.label}" ${disabled ? "disabled" : ""}>
         <strong>${item.label}</strong>
         <span class="action-state ${item.state}">${stateLabel}</span>
         <span class="action-detail">${item.detail} · ${item.resource}</span>
+        ${activity ? `<span class="action-activity">${escapeHtml(activity)}</span>` : ""}
+        ${freshness ? `<span class="action-blocker">${escapeHtml(freshness)}</span>` : ""}
         ${blocked ? `<span class="action-blocker">Wymaga: ${blocked}</span>` : ""}
       </button>
     `;

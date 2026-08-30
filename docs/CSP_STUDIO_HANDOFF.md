@@ -79,7 +79,7 @@ Target machine:
 
 ```text
 OS:          Windows
-Repo:        C:\Users\pat30\Youtube
+Repo:        C:\CSP\Youtube
 Python:      C:\CSP\venv\Scripts\python.exe
 Output root: C:\CSP\output
 Studio DB:   C:\CSP\output\csp-studio.db
@@ -102,7 +102,7 @@ Final:      C:\CSP\output\001-drzwi-0\final.mp4
 Typical shell setup:
 
 ```powershell
-cd C:\Users\pat30\Youtube
+cd C:\CSP\Youtube
 $py = "C:\CSP\venv\Scripts\python.exe"
 $env:CSP_OUTPUT_DIR = "C:\CSP\output"
 ```
@@ -421,6 +421,16 @@ RUNNING
 FAILED
 ```
 
+The Tasks view also has an in-app log viewer. It reads only the selected
+existing task's fixed `.studio-tasks/<task-id>.log` file, returns at most the
+last 64 KiB, drops a leading partial line at the truncation boundary, and masks
+common API-key/token/password/secret assignments (including quoted JSON and CLI
+forms) before display. Failed tasks persist only a sanitized exception summary,
+not a copied log tail. Task Engine initialization also removes legacy `| log:`
+suffixes from existing task errors while preserving the exception summary. This
+viewer is code-complete, covered by the Studio web regression, and was confirmed
+in the production browser on 2026-08-30 against an existing successful task log.
+
 Dependency design:
 
 - TTS: can run independently of later production artifacts,
@@ -432,7 +442,30 @@ Dependency design:
 
 Visual QA is categorized as `network` because hosted NIM must not reserve the local GPU resource.
 
-**Important:** the latest dependency/freshness/auto-drain changes were code-complete at handoff time but had **not yet been user-confirmed through the full local regression suite**. Treat them as needing verification before further architectural changes.
+**Codex-verified on 2026-08-30:** the canonical `C:\CSP\venv` was repaired by
+restoring its official Python 3.11.9 base interpreter. The combined handoff
+regression suite then passed **46/46** through that canonical environment. Core
+imports, Torch 2.6.0+cu124, Chatterbox presence, and faster-whisper presence were
+also checked directly. A broader `unittest discover` run passed **82/82**, and
+Python compilation plus both frontend JavaScript syntax checks returned code 0.
+
+The production Manual Action `opencut_export` was run locally and produced a
+validated 11,368-byte manifest with a `succeeded` task and `done/current`
+checkpoint. That run exposed and led to a fix for legacy freshness reconciliation:
+a newer downstream result must not be made stale again by an older Visual QA
+staleness event.
+
+The post-scene-change production chain was then completed on 2026-08-30:
+
+- NVIDIA NIM Visual QA task succeeded for project `001`; all eight scene
+  checkpoints and the aggregate checkpoint are `done`, score 75/100,
+- scene review reached 8/8,
+- Render Final task succeeded and left `visual_qa`, `opencut_export`, and
+  `render_final` at `done/current`,
+- `final.mp4` was independently checked with ffprobe and a full decode pass:
+  1080x1920 H.264 at 30 fps, AAC stereo 48 kHz, 46.57 s, 45,267,281 bytes,
+- raw Visual QA and render logs were scanned without printing their contents;
+  no unredacted NVIDIA credential, bearer token, or secret assignment was found.
 
 ---
 
@@ -619,19 +652,21 @@ Do not discard these working paths during refactors.
 
 ## 17. Not yet confirmed / needs fresh verification
 
-At handoff time, do **not** claim the following are locally verified unless Codex/user runs them:
+Do **not** claim the following are locally verified unless Codex/user runs them:
 
-- latest PR #11 combined regression suite after dependency/freshness/auto-drain changes,
-- latest `tests.test_csp_actions`,
-- latest `tests.test_csp_pipeline_state`,
-- latest expanded `tests.test_csp_task_runner`,
-- latest Visual QA placeholder regression tests,
 - full Manual Actions sequence end-to-end,
 - auto-drain behavior when two local GPU tasks overlap,
 - new artifact-validation failure behavior,
-- freshness migration on existing stale PoC artifacts,
-- newest Agent Memory sanitizer tests,
 - full stack regression from images through final render after the latest branch changes.
+
+Clarification after the later 2026-08-30 production run:
+
+- the recommended post-scene-change sequence Visual QA -> Review -> OpenCut ->
+  Render Final is now confirmed,
+- the larger deliberate-regeneration sequence beginning with TTS -> Captions ->
+  Sound was not rerun, because those production artifacts were already current,
+- the missing-key and 3/8-review blockers documented earlier were resolved without
+  persisting the key in the repository, database, task payloads, or logs.
 
 This distinction is important: code being present is not the same as user-confirmed integration success.
 
@@ -644,7 +679,7 @@ Before adding another large feature, first run the latest branch locally.
 ### Step 1 — update branch
 
 ```powershell
-cd C:\Users\pat30\Youtube
+cd C:\CSP\Youtube
 git fetch origin
 git switch feature/csp-studio-ops-dashboard
 git pull origin feature/csp-studio-ops-dashboard
@@ -707,13 +742,15 @@ Inspect Tasks and checkpoint freshness after every stage.
 
 ### Step 5 — only then continue feature development
 
-Good next candidates:
+Status of the earlier candidates:
 
-1. show task logs directly in the GUI,
-2. make pipeline freshness/status clearer in the dashboard,
-3. improve Manual Actions progress/status UX,
-4. validate OpenCut materialization against a supported OpenCut API rather than private serialization,
-5. continue Agent One/Universe Memory advisory improvements without weakening deterministic gates.
+1. pipeline freshness/status dashboard — implemented and production-browser checked,
+2. Manual Actions progress/status UX — implemented and regression checked,
+3. supported OpenCut API investigation — completed; no stable public import/headless
+   API exists yet, so CSP must retain its editor-neutral interchange boundary,
+4. next: continue Agent One/Universe Memory advisory improvements without weakening
+   deterministic gates, or finish the blocked production chain when credentials and
+   scene review are available.
 
 ---
 

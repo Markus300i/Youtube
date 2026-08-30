@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .log_safety import sanitize_persisted_task_error
 from .models import utc_now
 from .store import StudioStore
 
@@ -94,6 +95,23 @@ class TaskEngine:
         self.store = store
         self.store.conn.executescript(TASK_SCHEMA)
         self.store.conn.commit()
+        self._sanitize_existing_errors()
+
+    def _sanitize_existing_errors(self) -> None:
+        rows = self.store.conn.execute(
+            "SELECT task_id,error FROM studio_tasks WHERE error IS NOT NULL"
+        ).fetchall()
+        updates = []
+        for row in rows:
+            safe_error = sanitize_persisted_task_error(str(row["error"]))
+            if safe_error != row["error"]:
+                updates.append((safe_error, row["task_id"]))
+        if updates:
+            self.store.conn.executemany(
+                "UPDATE studio_tasks SET error=? WHERE task_id=?",
+                updates,
+            )
+            self.store.conn.commit()
 
     def submit(
         self,
@@ -293,6 +311,7 @@ class TaskEngine:
         task = self._require(task_id)
         if task.state not in {"running", "queued"}:
             raise RuntimeError(f"Task {task_id} cannot fail from state {task.state}")
+        error = sanitize_persisted_task_error(str(error))
         now = utc_now()
         self.store.conn.execute(
             """

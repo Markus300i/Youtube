@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +13,7 @@ import yaml
 
 from csp_studio.import_short import project_from_short
 from csp_studio.store import StudioStore
+from csp_studio.task_engine import TaskEngine
 from csp_studio.task_runner import SUPPORTED_STAGES, StudioTaskRunner, run_task_waiting
 
 
@@ -107,6 +112,99 @@ class StudioTaskRunnerTests(unittest.TestCase):
             )
         self.assertEqual(result["state"], "succeeded")
         self.assertEqual(mocked.call_count, 3)
+
+    def test_failure_does_not_persist_raw_log_tail_or_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "output"
+            output.mkdir()
+            db = output / "studio.db"
+            payload = {
+                "id": "001",
+                "title": "Drzwi 0",
+                "scenes": [{"id": 1, "text": "A", "prompt": "A"}],
+            }
+            with StudioStore(db) as store:
+                store.upsert_project(project_from_short(payload))
+                task = TaskEngine(store).submit("001", "tts", resource="gpu")
+
+            runner = StudioTaskRunner(db, output_root=output, python_executable="python")
+
+            def fail_with_secret(task_id: str, log_path: Path) -> dict:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_path.write_text("NVIDIA_API_KEY=log-secret", encoding="utf-8")
+                raise RuntimeError("TOKEN=exception-secret")
+
+            with patch.object(runner, "_execute", side_effect=fail_with_secret):
+                result = runner.run(task.task_id)
+
+            self.assertEqual(result["state"], "failed")
+            self.assertEqual(result["error"], "RuntimeError: TOKEN=[REDACTED]")
+            self.assertNotIn("log-secret", result["error"])
+            self.assertNotIn("exception-secret", result["error"])
+            self.assertNotIn("| log:", result["error"])
+
+    def test_display_command_redacts_cli_secret(self) -> None:
+        command = StudioTaskRunner._display_command(["tool", "--api-key", "cli-secret"])
+        self.assertNotIn("cli-secret", command)
+        self.assertIn("[REDACTED]", command)
+
+    def test_process_output_is_redacted_before_log_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "output"
+            output.mkdir()
+            db = output / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(project_from_short({"id": "001", "title": "Drzwi 0", "scenes": []}))
+                task = TaskEngine(store).submit("001", "tts", resource="gpu")
+                TaskEngine(store).claim(task.task_id, "test-worker")
+
+            log_path = output / ".studio-tasks" / f"{task.task_id}.log"
+            runner = StudioTaskRunner(db, output_root=output, python_executable=sys.executable)
+            returncode = runner._run_process(
+                task.task_id,
+                [sys.executable, "-c", "print('NVIDIA_API_KEY=stdout-secret')"],
+                log_path,
+                env=os.environ.copy(),
+            )
+
+            self.assertEqual(returncode, 0)
+            content = log_path.read_text(encoding="utf-8")
+            self.assertNotIn("stdout-secret", content)
+            self.assertIn("NVIDIA_API_KEY=[REDACTED]", content)
+
+    def test_process_output_pump_preserves_task_cancellation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "output"
+            output.mkdir()
+            db = output / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(project_from_short({"id": "001", "title": "Drzwi 0", "scenes": []}))
+                task = TaskEngine(store).submit("001", "tts", resource="gpu")
+                TaskEngine(store).claim(task.task_id, "test-worker")
+
+            def cancel_task() -> None:
+                with StudioStore(db) as store:
+                    TaskEngine(store).cancel(task.task_id)
+
+            timer = threading.Timer(0.2, cancel_task)
+            runner = StudioTaskRunner(db, output_root=output, python_executable=sys.executable)
+            started = time.monotonic()
+            timer.start()
+            try:
+                returncode = runner._run_process(
+                    task.task_id,
+                    [sys.executable, "-c", "import time; print('started'); time.sleep(10)"],
+                    output / ".studio-tasks" / f"{task.task_id}.log",
+                    env=os.environ.copy(),
+                )
+            finally:
+                timer.cancel()
+
+            self.assertNotEqual(returncode, 0)
+            self.assertLess(time.monotonic() - started, 5)
 
 
 if __name__ == "__main__":

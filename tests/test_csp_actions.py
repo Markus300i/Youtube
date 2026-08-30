@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
-from csp_studio.action_api import ACTION_META, MANUAL_ACTIONS, _quick_snapshot
+from csp_studio.action_api import ACTION_META, MANUAL_ACTIONS, _quick_snapshot, _run_logged, action_statuses
+from csp_studio.import_short import project_from_short
+from csp_studio.store import StudioStore
+from csp_studio.task_engine import TaskEngine
 
 
 class StudioActionsTests(unittest.TestCase):
@@ -78,6 +84,66 @@ class StudioActionsTests(unittest.TestCase):
             ACTION_META["render_final"]["requires"],
             ("active_images", "tts", "captions", "sound_design", "scene_review"),
         )
+
+    def test_quick_runner_command_log_redacts_cli_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "quick.log"
+            result = _run_logged(
+                [
+                    sys.executable,
+                    "-c",
+                    "print('TOKEN=process-secret')",
+                    "--token",
+                    "quick-secret",
+                ],
+                log_path,
+                os.environ.copy(),
+            )
+
+            self.assertEqual(result, 0)
+            content = log_path.read_text(encoding="utf-8")
+            self.assertNotIn("quick-secret", content)
+            self.assertNotIn("process-secret", content)
+            self.assertGreaterEqual(content.count("[REDACTED]"), 2)
+
+    def test_action_status_reports_resource_wait_and_running_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "studio.db"
+            with StudioStore(db) as store:
+                for project_id in ("001", "002"):
+                    store.upsert_project(
+                        project_from_short(
+                            {
+                                "id": project_id,
+                                "title": f"Project {project_id}",
+                                "scenes": [{"id": 1, "text": "A", "prompt": "A"}],
+                            }
+                        )
+                    )
+                engine = TaskEngine(store)
+                blocker = engine.submit("002", "regenerate_image", resource="gpu")
+                engine.claim(blocker.task_id, "gpu-worker")
+                queued = engine.submit("001", "tts", resource="gpu")
+                running = engine.submit("001", "visual_qa", resource="network")
+                engine.claim(running.task_id, "network-worker")
+                engine.progress(running.task_id, 35, stage="scene_03")
+
+                statuses = {
+                    item["action"]: item
+                    for item in action_statuses(
+                        store,
+                        "001",
+                        report=SimpleNamespace(checks=[]),
+                    )
+                }
+
+            self.assertEqual(statuses["tts"]["state"], "queued")
+            self.assertEqual(statuses["tts"]["active_progress"], queued.progress)
+            self.assertIn(blocker.task_id, statuses["tts"]["waiting_reason"])
+            self.assertEqual(statuses["tts"]["blocking_task"]["task_id"], blocker.task_id)
+            self.assertEqual(statuses["visual_qa"]["state"], "running")
+            self.assertEqual(statuses["visual_qa"]["active_progress"], 35)
+            self.assertEqual(statuses["visual_qa"]["current_step"], "scene_03")
 
 
 if __name__ == "__main__":

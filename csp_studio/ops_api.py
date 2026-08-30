@@ -9,8 +9,9 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from .action_api import run_quick_regenerate
+from .action_api import action_statuses, run_quick_regenerate
 from .agent_one import AgentOne
+from .log_safety import DEFAULT_LOG_TAIL_BYTES, read_redacted_log_tail
 from .store import StudioStore
 from .task_engine import StudioTask, TaskEngine
 from .task_runner import run_task_waiting
@@ -21,6 +22,8 @@ OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 
 router = APIRouter()
+
+TASK_LOG_DIR = (OUTPUT_ROOT / ".studio-tasks").resolve()
 
 PLACEHOLDER_NOTES = {
     ("specific issue", "specific fix"),
@@ -112,6 +115,22 @@ def _schedule(background_tasks: BackgroundTasks, task: StudioTask) -> None:
         )
 
 
+def _task_log_path(task_id: str) -> Path:
+    path = (TASK_LOG_DIR / f"{task_id}.log").resolve()
+    try:
+        path.relative_to(TASK_LOG_DIR)
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid task id for log lookup") from exc
+    return path
+
+
+def _read_task_log(path: Path) -> dict[str, Any]:
+    try:
+        return read_redacted_log_tail(path, max_bytes=DEFAULT_LOG_TAIL_BYTES)
+    except OSError as exc:
+        raise HTTPException(500, f"Could not read task log: {type(exc).__name__}") from exc
+
+
 @router.get("/api/projects/{project_id}/ops-dashboard")
 def ops_dashboard(project_id: str):
     with StudioStore(DB_PATH) as store:
@@ -122,6 +141,7 @@ def ops_dashboard(project_id: str):
         approved_ids = [scene.scene_id for scene in scenes if scene.status in {"approved", "render_ready"}]
         pending_ids = [scene.scene_id for scene in scenes if scene.status not in {"approved", "render_ready"}]
         tasks = [task.to_dict() for task in agent.tasks.list(project_id)[:30]]
+        pipeline = action_statuses(store, project_id, report=report)
         return {
             "agent": report.to_dict(),
             "review": {
@@ -132,6 +152,7 @@ def ops_dashboard(project_id: str):
             },
             "visual_qa": _read_visual_qa(store, project_id),
             "memory": _memory_status(store, project_id),
+            "pipeline": pipeline,
             "tasks": tasks,
         }
 
@@ -157,6 +178,20 @@ def run_queued_task(task_id: str, background_tasks: BackgroundTasks):
             raise HTTPException(400, f"Task {task_id} is {task.state}, expected queued")
         _schedule(background_tasks, task)
         return {"scheduled": True, "task": task.to_dict()}
+
+
+@router.get("/api/tasks/{task_id}/log")
+def task_log(task_id: str):
+    with StudioStore(DB_PATH) as store:
+        task = TaskEngine(store).get(task_id)
+        if task is None:
+            raise HTTPException(404, f"Unknown task: {task_id}")
+        return {
+            "task_id": task.task_id,
+            "stage": task.stage,
+            "state": task.state,
+            **_read_task_log(_task_log_path(task.task_id)),
+        }
 
 
 @router.post("/api/tasks/{task_id}/retry")

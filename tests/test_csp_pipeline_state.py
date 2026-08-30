@@ -9,6 +9,7 @@ from csp_studio.pipeline_state import (
     invalidate_after_image_change,
     invalidate_after_stage,
     is_stale,
+    mark_done,
 )
 from csp_studio.store import StudioStore
 from csp_studio.task_engine import TaskEngine
@@ -67,6 +68,29 @@ class PipelineFreshnessTests(unittest.TestCase):
                 self.assertTrue(is_stale(engine, "001", "render_final"))
                 self.assertEqual(engine.get_checkpoint("001", "render_final")["state"], "stale")
                 self.assertEqual(engine.get_checkpoint("001", "opencut_export")["state"], "stale")
+
+    def test_newer_opencut_success_is_not_restaled_by_legacy_reconciliation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "csp-opencut.json"
+            manifest.write_text("{}", encoding="utf-8")
+            with StudioStore(Path(tmp) / "studio.db") as store:
+                store.upsert_project(self._project())
+                engine = TaskEngine(store)
+                engine.set_checkpoint(
+                    "001",
+                    "visual_qa",
+                    "stale",
+                    metadata={"reason": "image changed"},
+                )
+                store.conn.execute(
+                    "UPDATE pipeline_checkpoints SET updated_at=? WHERE project_id=? AND stage=?",
+                    ("2000-01-01T00:00:00+00:00", "001", "visual_qa"),
+                )
+                store.conn.commit()
+                mark_done(engine, "001", "opencut_export", artifact_path=manifest)
+
+                self.assertFalse(is_stale(engine, "001", "opencut_export"))
+                self.assertEqual(engine.get_checkpoint("001", "opencut_export")["state"], "done")
 
 
 if __name__ == "__main__":

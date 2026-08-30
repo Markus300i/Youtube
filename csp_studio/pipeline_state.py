@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -52,12 +53,30 @@ def reconcile_legacy_staleness(engine: TaskEngine, project_id: str) -> None:
         checkpoint = engine.get_checkpoint(project_id, stage)
         if checkpoint and checkpoint.get("state") == "stale":
             continue
+        if checkpoint and _checkpoint_is_newer(checkpoint, visual):
+            # A downstream stage explicitly ran after the image invalidation.
+            # Legacy reconciliation must not undo that newer result merely
+            # because Visual QA is still stale (OpenCut does not depend on it).
+            continue
         engine.set_checkpoint(
             project_id,
             stage,
             "stale",
             metadata={"reason": f"reconciled from visual_qa stale: {reason}"},
         )
+
+
+def _checkpoint_is_newer(checkpoint: dict, source: dict) -> bool:
+    candidate = str(checkpoint.get("updated_at") or "")
+    baseline = str(source.get("updated_at") or "")
+    if not candidate or not baseline:
+        return False
+    try:
+        return datetime.fromisoformat(candidate) > datetime.fromisoformat(baseline)
+    except ValueError:
+        # Existing SQLite rows use sortable ISO-8601 UTC timestamps. Keep a
+        # conservative fallback for hand-edited/legacy databases.
+        return candidate > baseline
 
 
 def is_stale(engine: TaskEngine, project_id: str, stage: str) -> bool:

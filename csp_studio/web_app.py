@@ -278,8 +278,6 @@ def replace_scene(
         with StudioStore(DB_PATH) as store:
             ops = SceneOperations(store, _images_dir(store, project_id))
             asset = ops.replace_image(project_id, scene_id, incoming, source=source, note=note)
-            TaskEngine(store).set_checkpoint(project_id, "visual_qa", "stale", metadata={"reason": f"scene {scene_id} image replaced"})
-            TaskEngine(store).set_checkpoint(project_id, f"visual_qa_scene_{scene_id:02d}", "stale", metadata={"reason": "image revision changed"})
             return {"asset": asset.to_dict(), "scene": _scene_payload(store, project_id, scene_id)}
     except (KeyError, ValueError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
