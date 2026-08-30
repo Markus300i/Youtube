@@ -8,6 +8,18 @@
     ["render_final", "Render Final", "FFmpeg final MP4"],
   ];
 
+  const style = document.createElement("style");
+  style.textContent = `
+    .manual-action-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
+    .manual-action-btn { text-align:left; min-height:72px; display:grid; gap:5px; }
+    .manual-action-btn strong { color:var(--text); }
+    .manual-action-btn span { color:var(--muted); font-size:11px; }
+    #quickRegenBtn { border-color:#40567c; color:#a9c7ff; }
+    @media (max-width:780px) { .manual-action-grid { grid-template-columns:1fr 1fr; } }
+    @media (max-width:520px) { .manual-action-grid { grid-template-columns:1fr; } }
+  `;
+  document.head.appendChild(style);
+
   let pollBusy = false;
 
   async function quickRegenerate() {
