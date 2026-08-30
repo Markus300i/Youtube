@@ -42,6 +42,30 @@ class NvidiaNimProviderTests(unittest.TestCase):
         self.assertEqual(response.usage["completion_tokens"], 1)
         client.close()
 
+    def test_api_key_trims_surrounding_whitespace(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["auth"] = request.headers.get("Authorization")
+            return httpx.Response(
+                200,
+                json={
+                    "model": "mock",
+                    "choices": [{"message": {"content": "ok"}}],
+                },
+            )
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        provider = NvidiaNimProvider(api_key="  secret-test-key \r\n", base_url=" https://nim.test/v1/ ", client=client)
+        provider.chat([{"role": "user", "content": "hello"}], model="mock")
+        self.assertEqual(seen["auth"], "Bearer secret-test-key")
+        self.assertEqual(provider.base_url, "https://nim.test/v1")
+        client.close()
+
+    def test_api_key_rejects_internal_whitespace(self) -> None:
+        with self.assertRaises(ProviderError):
+            NvidiaNimProvider(api_key="secret test key")
+
     def test_missing_key_fails_before_network_request(self) -> None:
         called = False
 
