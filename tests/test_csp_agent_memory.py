@@ -14,8 +14,9 @@ class FakeMemoryProvider:
     name = "fake_memory"
     embed_model = "fake-embed"
 
-    def __init__(self):
+    def __init__(self, *, chat_text: str | None = None):
         self.chat_messages = None
+        self.chat_text = chat_text or "Stan bez zmian. Pamięć wskazuje podobny motyw drzwi."
 
     def embed(self, texts, *, model=None, input_type="passage"):
         vectors = []
@@ -33,7 +34,7 @@ class FakeMemoryProvider:
         return ProviderResponse(
             provider=self.name,
             model="fake-chat",
-            text="Stan bez zmian. Pamięć wskazuje podobny motyw drzwi.",
+            text=self.chat_text,
         )
 
 
@@ -107,6 +108,40 @@ class AgentOneMemoryAdvisorTests(unittest.TestCase):
                 self.assertEqual(result["memory"]["matches"], [])
                 self.assertIn("embedding unavailable", result["memory"]["error"])
                 self.assertIn("Stan bez zmian", result["assistant"]["text"])
+
+    def test_reasoning_prefix_is_removed_when_final_report_exists(self):
+        provider = FakeMemoryProvider(
+            chat_text=(
+                "Here's a thinking process:\n1. inspect state\n2. check memory\n\n"
+                "Final answer:\nStan: etap assets.\nNajbliższy krok: complete_images.\n"
+                "Uwagi z pamięci: Brak porównania z wcześniejszymi projektami."
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project("001", "Drzwi 0", "Drzwi w piwnicy"))
+                advisor = AgentOneMemoryAdvisor(store, output_root=root)
+                result = advisor.advise("001", provider, memory_provider=provider)
+                text = result["assistant"]["text"]
+                self.assertNotIn("thinking process", text.lower())
+                self.assertNotIn("inspect state", text.lower())
+                self.assertIn("Stan: etap assets", text)
+
+    def test_reasoning_without_final_section_uses_deterministic_fallback(self):
+        provider = FakeMemoryProvider(
+            chat_text="Analysis:\nI will inspect the state step by step and then decide what to do."
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with StudioStore(root / "studio.db") as store:
+                store.upsert_project(self._project("001", "Drzwi 0", "Drzwi w piwnicy"))
+                advisor = AgentOneMemoryAdvisor(store, output_root=root)
+                result = advisor.advise("001", provider, memory_provider=provider)
+                text = result["assistant"]["text"]
+                self.assertNotIn("step by step", text.lower())
+                self.assertIn("Najbliższy krok: complete_images", text)
+                self.assertIn("Brak porównania z wcześniejszymi projektami", text)
 
 
 if __name__ == "__main__":
