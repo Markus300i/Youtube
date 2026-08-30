@@ -11,6 +11,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .action_api import router as action_router
 from .asset_manager import AssetManager, VALID_SCENE_STATUSES
 from .models import ShotPlan
 from .ops_api import router as ops_router
@@ -65,8 +66,9 @@ MOTION_TYPES = {
     "micro_handheld",
 }
 
-app = FastAPI(title="CSP Studio", version="0.4.0")
+app = FastAPI(title="CSP Studio", version="0.5.0")
 app.include_router(ops_router)
+app.include_router(action_router)
 
 
 class ShotPlanUpdate(BaseModel):
