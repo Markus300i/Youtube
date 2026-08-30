@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ from .pipeline_state import invalidate_after_image_change
 from .scene_ops import SceneOperations
 from .store import StudioStore
 from .task_engine import TaskEngine
-from .task_runner import StudioTaskRunner, run_task
+from .task_runner import StudioTaskRunner, run_task_waiting
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -163,19 +164,32 @@ def _action_statuses(store: StudioStore, project_id: str) -> list[dict[str, Any]
 
 def run_quick_regenerate(task_id: str) -> dict[str, Any]:
     log_path = OUTPUT_ROOT / ".studio-tasks" / f"{task_id}.log"
-    with StudioStore(DB_PATH) as store:
-        engine = TaskEngine(store)
-        task = engine.claim(task_id, "studio-web-quick")
-        if task is None:
+    deadline = time.time() + 7200
+
+    while True:
+        with StudioStore(DB_PATH) as store:
+            engine = TaskEngine(store)
+            task = engine.claim(task_id, "studio-web-quick")
+            if task is not None:
+                if task.scene_id is None:
+                    return engine.fail(task_id, "Quick regenerate requires scene_id").to_dict()
+                engine.progress(task_id, 5, stage="prepare")
+                title = _project_title(store, task.project_id)
+                base_snapshot = StudioTaskRunner(DB_PATH, output_root=OUTPUT_ROOT)._write_snapshot(store, task.project_id)
+                break
+
             current = engine.get(task_id)
             if current is None:
                 raise KeyError(task_id)
-            return current.to_dict()
-        if task.scene_id is None:
-            return engine.fail(task_id, "Quick regenerate requires scene_id").to_dict()
-        engine.progress(task_id, 5, stage="prepare")
-        title = _project_title(store, task.project_id)
-        base_snapshot = StudioTaskRunner(DB_PATH, output_root=OUTPUT_ROOT)._write_snapshot(store, task.project_id)
+            if current.state != "queued":
+                return current.to_dict()
+            if time.time() >= deadline:
+                return engine.fail(
+                    task_id,
+                    "Timed out waiting 7200s for GPU resource",
+                    failed_stage="queue_wait",
+                ).to_dict()
+        time.sleep(2)
 
     try:
         env = os.environ.copy()
@@ -307,5 +321,5 @@ def manual_action(project_id: str, action: str, background_tasks: BackgroundTask
             payload={"source": "manual-actions-panel"},
         )
 
-    background_tasks.add_task(run_task, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
+    background_tasks.add_task(run_task_waiting, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
     return {"scheduled": True, "task": task.to_dict(), "action": status}
