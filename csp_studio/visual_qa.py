@@ -239,11 +239,15 @@ class VisualQA:
         )
 
     @staticmethod
-    def _fallback_aggregate(scene_results: list[dict[str, Any]], shot_score: int) -> dict[str, Any]:
+    def _fallback_aggregate(scene_results: list[dict[str, Any]], shot_score: int, reason: str | None = None) -> dict[str, Any]:
+        summary = "Visual scene reviews completed. Structured aggregate unavailable; inspect per-scene review_text artifacts."
+        warnings: list[str] = []
+        if reason:
+            warnings.append(f"Text aggregation unavailable: {reason[:300]}")
         return {
             "score": max(0, min(100, int(shot_score))),
-            "summary": "Visual scene reviews completed. Structured aggregate unavailable; inspect per-scene review_text artifacts.",
-            "warnings": [],
+            "summary": summary,
+            "warnings": warnings,
             "continuity": [],
             "monotony": [],
             "scene_notes": [],
@@ -265,16 +269,16 @@ class VisualQA:
             chat = getattr(provider, "chat", None)
             if callable(chat):
                 print("VISUAL QA: AGGREGATE TEXT")
-                aggregate_response = chat(
-                    [{"role": "user", "content": self._aggregate_prompt(project_id, scene_results, shot_audit.score, shot_audit.warnings)}],
-                    temperature=0.1,
-                    max_tokens=1200,
-                )
                 try:
+                    aggregate_response = chat(
+                        [{"role": "user", "content": self._aggregate_prompt(project_id, scene_results, shot_audit.score, shot_audit.warnings)}],
+                        temperature=0.1,
+                        max_tokens=1200,
+                    )
                     data = self._parse_json(aggregate_response.text)
                 except ProviderError as exc:
                     print(f"VISUAL QA: AGGREGATE FALLBACK ({exc})")
-                    data = self._fallback_aggregate(scene_results, shot_audit.score)
+                    data = self._fallback_aggregate(scene_results, shot_audit.score, str(exc))
             else:
                 data = self._fallback_aggregate(scene_results, shot_audit.score)
 
