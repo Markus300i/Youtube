@@ -9,9 +9,10 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
+from .action_api import router as action_router, run_quick_regenerate
 from .agent_one import AgentOne
 from .store import StudioStore
-from .task_engine import TaskEngine
+from .task_engine import StudioTask, TaskEngine
 from .task_runner import run_task
 from .universe_memory import UniverseMemory
 
@@ -20,6 +21,7 @@ OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 
 router = APIRouter()
+router.include_router(action_router)
 
 PLACEHOLDER_NOTES = {
     ("specific issue", "specific fix"),
@@ -99,8 +101,11 @@ def _memory_status(store: StudioStore, project_id: str) -> dict[str, Any]:
     }
 
 
-def _schedule(background_tasks: BackgroundTasks, task_id: str) -> None:
-    background_tasks.add_task(run_task, task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
+def _schedule(background_tasks: BackgroundTasks, task: StudioTask) -> None:
+    if task.stage == "regenerate_image_quick":
+        background_tasks.add_task(run_quick_regenerate, task.task_id)
+    else:
+        background_tasks.add_task(run_task, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
 
 
 @router.get("/api/projects/{project_id}/ops-dashboard")
@@ -146,7 +151,7 @@ def run_queued_task(task_id: str, background_tasks: BackgroundTasks):
             raise HTTPException(404, f"Unknown task: {task_id}")
         if task.state != "queued":
             raise HTTPException(400, f"Task {task_id} is {task.state}, expected queued")
-        _schedule(background_tasks, task_id)
+        _schedule(background_tasks, task)
         return {"scheduled": True, "task": task.to_dict()}
 
 
@@ -158,7 +163,7 @@ def retry_task(task_id: str, background_tasks: BackgroundTasks):
             task = engine.retry(task_id)
         except (KeyError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
-        _schedule(background_tasks, task_id)
+        _schedule(background_tasks, task)
         return {"scheduled": True, "task": task.to_dict()}
 
 
