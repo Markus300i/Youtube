@@ -158,6 +158,22 @@ class StudioWebTests(unittest.TestCase):
                 self.assertEqual(after_review.status_code, 200, after_review.text)
                 self.assertEqual(after_review.json()["review"]["approved"], 1)
                 self.assertEqual(after_review.json()["review"]["pending_ids"], [2])
+
+                regenerate = client.post(
+                    "/api/projects/001/scenes/1/regenerate",
+                    data={"note": "regenerate button test"},
+                )
+                self.assertEqual(regenerate.status_code, 200, regenerate.text)
+                regen_data = regenerate.json()
+                self.assertTrue(regen_data["queued"])
+                self.assertEqual(regen_data["scene"]["status"], "needs_regeneration")
+                self.assertEqual(regen_data["task"]["stage"], "regenerate_image")
+                self.assertEqual(regen_data["task"]["scene_id"], 1)
+                self.assertEqual(regen_data["task"]["state"], "queued")
+
+                dashboard_with_task = client.get("/api/projects/001/ops-dashboard")
+                self.assertEqual(dashboard_with_task.status_code, 200)
+                self.assertEqual(dashboard_with_task.json()["tasks"][0]["stage"], "regenerate_image")
             finally:
                 if old_output is None:
                     os.environ.pop("CSP_OUTPUT_DIR", None)
