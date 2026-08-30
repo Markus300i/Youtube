@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -70,7 +71,16 @@ def _project_title(store: StudioStore, project_id: str) -> str:
     return str(row["title"])
 
 
-def _run_logged(command: list[str], log_path: Path, env: dict[str, str]) -> int:
+def _run_logged(
+    command: list[str],
+    log_path: Path,
+    env: dict[str, str],
+    *,
+    task_id: str | None = None,
+    db_path: str | Path = DB_PATH,
+) -> int:
+    """Run a logged process and terminate it when its Studio task is cancelled."""
+
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8", errors="replace") as log:
         log.write("\n" + "=" * 72 + "\n")
@@ -88,17 +98,42 @@ def _run_logged(command: list[str], log_path: Path, env: dict[str, str]) -> int:
             bufsize=1,
         )
         assert process.stdout is not None
-        copy_redacted_stream(process.stdout, log)
+        pump_errors: list[BaseException] = []
+
+        def pump_output() -> None:
+            try:
+                copy_redacted_stream(process.stdout, log)
+            except BaseException as exc:  # pragma: no cover - defensive I/O boundary
+                pump_errors.append(exc)
+
+        pump = threading.Thread(target=pump_output, name=f"quick-log-{task_id or process.pid}", daemon=True)
+        pump.start()
+        while process.poll() is None:
+            time.sleep(0.5)
+            if task_id is None:
+                continue
+            with StudioStore(db_path) as store:
+                current = TaskEngine(store).get(task_id)
+                if current is not None and current.state == "cancelled":
+                    process.terminate()
+                    try:
+                        process.wait(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    break
+        pump.join()
         process.stdout.close()
-        return int(process.wait())
+        if pump_errors:
+            raise RuntimeError(f"Could not persist sanitized quick-task output: {type(pump_errors[0]).__name__}") from pump_errors[0]
+        return int(process.returncode if process.returncode is not None else -1)
 
 
-def _ensure_comfy(log_path: Path, env: dict[str, str]) -> None:
+def _ensure_comfy(task_id: str, log_path: Path, env: dict[str, str]) -> None:
     if os.name != "nt":
         return
     script = ROOT / "setup" / "ensure-comfyui.ps1"
     command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
-    rc = _run_logged(command, log_path, env)
+    rc = _run_logged(command, log_path, env, task_id=task_id)
     if rc != 0:
         raise RuntimeError("ComfyUI could not be started")
 
@@ -248,7 +283,7 @@ def run_quick_regenerate(task_id: str) -> dict[str, Any]:
         env["CSP_STUDIO_DB"] = str(DB_PATH)
         with StudioStore(DB_PATH) as store:
             TaskEngine(store).progress(task_id, 10, stage="ensure_comfyui")
-        _ensure_comfy(log_path, env)
+        _ensure_comfy(task_id, log_path, env)
 
         with tempfile.TemporaryDirectory(prefix="csp-studio-quick-") as tmp:
             tmp_root = Path(tmp)
@@ -259,7 +294,7 @@ def run_quick_regenerate(task_id: str) -> dict[str, Any]:
             command = [sys.executable, str(ROOT / "scripts" / "generate_scene.py"), str(quick_yaml), str(task.scene_id)]
             with StudioStore(DB_PATH) as store:
                 TaskEngine(store).progress(task_id, 20, stage="quick_generate")
-            rc = _run_logged(command, log_path, quick_env)
+            rc = _run_logged(command, log_path, quick_env, task_id=task_id)
             if rc != 0:
                 raise RuntimeError(f"Quick scene generator exited with code {rc}")
 
@@ -269,6 +304,9 @@ def run_quick_regenerate(task_id: str) -> dict[str, Any]:
 
             with StudioStore(DB_PATH) as store:
                 engine = TaskEngine(store)
+                current = engine.get(task_id)
+                if current is not None and current.state == "cancelled":
+                    return current.to_dict()
                 engine.progress(task_id, 85, stage="activate_revision")
                 images_dir = OUTPUT_ROOT / f"{task.project_id}-{_slug(title)}" / "images"
                 asset = SceneOperations(store, images_dir).replace_image(
