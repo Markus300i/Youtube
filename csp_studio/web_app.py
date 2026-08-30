@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .asset_manager import AssetManager, VALID_SCENE_STATUSES
 from .models import ShotPlan
+from .ops_api import router as ops_router
 from .scene_ops import SUPPORTED_IMAGE_EXTENSIONS, SceneOperations
 from .shot_director import ShotDirector
 from .store import StudioStore
@@ -63,7 +64,8 @@ MOTION_TYPES = {
     "micro_handheld",
 }
 
-app = FastAPI(title="CSP Studio", version="0.2.0")
+app = FastAPI(title="CSP Studio", version="0.3.0")
+app.include_router(ops_router)
 
 
 class ShotPlanUpdate(BaseModel):
