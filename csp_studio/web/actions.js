@@ -1,19 +1,18 @@
 (() => {
-  const ACTIONS = [
-    ["tts", "TTS", "Chatterbox narration"],
-    ["captions", "Captions", "Whisper subtitles"],
-    ["sound_design", "Sound", "Final audio mix"],
-    ["visual_qa", "Visual QA", "NVIDIA visual review"],
-    ["opencut_export", "OpenCut", "Export interchange"],
-    ["render_final", "Render Final", "FFmpeg final MP4"],
-  ];
-
   const style = document.createElement("style");
   style.textContent = `
     .manual-action-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
-    .manual-action-btn { text-align:left; min-height:72px; display:grid; gap:5px; }
+    .manual-action-btn { text-align:left; min-height:92px; display:grid; grid-template-columns:1fr auto; gap:5px 8px; align-items:start; }
     .manual-action-btn strong { color:var(--text); }
-    .manual-action-btn span { color:var(--muted); font-size:11px; }
+    .manual-action-btn .action-detail { color:var(--muted); font-size:11px; grid-column:1 / -1; }
+    .manual-action-btn .action-blocker { color:var(--warn); font-size:11px; grid-column:1 / -1; }
+    .manual-action-btn:disabled { cursor:not-allowed; opacity:.58; }
+    .action-state { font-size:9px; letter-spacing:.08em; padding:3px 6px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+    .action-state.done { color:var(--good); border-color:#2f6b4e; }
+    .action-state.ready { color:#a9c7ff; border-color:#40567c; }
+    .action-state.blocked { color:var(--warn); border-color:#6e5a2b; }
+    .action-state.failed { color:var(--bad); border-color:#744545; }
+    .action-state.running, .action-state.queued { color:var(--warn); border-color:#6e5a2b; }
     #quickRegenBtn { border-color:#40567c; color:#a9c7ff; }
     @media (max-width:780px) { .manual-action-grid { grid-template-columns:1fr 1fr; } }
     @media (max-width:520px) { .manual-action-grid { grid-template-columns:1fr; } }
@@ -22,6 +21,7 @@
 
   let pollBusy = false;
   let injectScheduled = false;
+  let actionsFetchBusy = false;
 
   async function quickRegenerate() {
     const scene = selectedScene();
@@ -32,7 +32,11 @@
         `/api/projects/${state.projectId}/scenes/${scene.scene_id}/quick-regenerate`,
         { method: "POST" },
       );
-      toast(`Quick Regenerate dodany: ${result.task.task_id}`);
+      if (result.scheduled === false) {
+        toast(`Quick Regenerate już działa: ${result.task.task_id}`);
+      } else {
+        toast(`Quick Regenerate dodany: ${result.task.task_id}`);
+      }
       await loadProjectData();
       switchView("tasks");
     } catch (err) {
@@ -44,11 +48,16 @@
     try {
       toast(`${label}: dodaję task…`);
       const result = await api(`/api/projects/${state.projectId}/actions/${action}`, { method: "POST" });
-      toast(`${label}: ${result.task.task_id}`);
+      if (result.scheduled === false) {
+        toast(`${label}: task już jest aktywny`);
+      } else {
+        toast(`${label}: ${result.task.task_id}`);
+      }
       await loadProjectData();
       switchView("tasks");
     } catch (err) {
       alert(`${label}: ${err.message}`);
+      refreshManualActions().catch(() => {});
     }
   }
 
@@ -56,8 +65,6 @@
     const quality = document.getElementById("regenBtn");
     if (!quality) return;
 
-    // Do not rewrite textContent on every MutationObserver callback: doing so
-    // creates another childList mutation and can lock the browser in a loop.
     if (quality.textContent !== "Quality Regenerate") {
       quality.textContent = "Quality Regenerate";
     }
@@ -72,6 +79,45 @@
     quality.parentElement?.insertBefore(quick, quality);
   }
 
+  function actionButtonHtml(item) {
+    const blocked = (item.missing_labels || []).join(", ");
+    const disabled = !item.can_run;
+    const stateLabel = String(item.state || "ready").toUpperCase();
+    return `
+      <button class="ghost manual-action-btn" data-manual-action="${item.action}" data-label="${item.label}" ${disabled ? "disabled" : ""}>
+        <strong>${item.label}</strong>
+        <span class="action-state ${item.state}">${stateLabel}</span>
+        <span class="action-detail">${item.detail} · ${item.resource}</span>
+        ${blocked ? `<span class="action-blocker">Wymaga: ${blocked}</span>` : ""}
+      </button>
+    `;
+  }
+
+  function bindManualButtons(card) {
+    card.querySelectorAll("[data-manual-action]").forEach(button => {
+      button.addEventListener("click", () => runManualAction(button.dataset.manualAction, button.dataset.label));
+    });
+  }
+
+  async function refreshManualActions() {
+    const card = document.getElementById("manualActionsCard");
+    if (!card || !state.projectId || actionsFetchBusy) return;
+    actionsFetchBusy = true;
+    try {
+      const data = await api(`/api/projects/${state.projectId}/actions`);
+      const grid = card.querySelector(".manual-action-grid");
+      if (!grid) return;
+      grid.innerHTML = data.actions.map(actionButtonHtml).join("");
+      bindManualButtons(card);
+      card.dataset.projectId = state.projectId;
+    } catch (err) {
+      const grid = card.querySelector(".manual-action-grid");
+      if (grid) grid.innerHTML = `<div class="muted">Nie udało się pobrać statusów akcji: ${escapeHtml(err.message)}</div>`;
+    } finally {
+      actionsFetchBusy = false;
+    }
+  }
+
   function injectManualActions() {
     const grid = document.querySelector("#opsDashboard .dashboard-grid");
     if (!grid || document.getElementById("manualActionsCard")) return;
@@ -82,19 +128,11 @@
     card.innerHTML = `
       <div class="eyebrow">MANUAL ACTIONS</div>
       <h3>Uruchom etap niezależnie od Agent One</h3>
-      <p class="muted">Akcje tworzą normalne taski i nie zmieniają deterministycznego next_action.</p>
-      <div class="manual-action-grid">
-        ${ACTIONS.map(([action, label, detail]) => `
-          <button class="ghost manual-action-btn" data-manual-action="${action}" data-label="${label}">
-            <strong>${label}</strong><span>${detail}</span>
-          </button>
-        `).join("")}
-      </div>
+      <p class="muted">Ręczne akcje nie zmieniają next_action, ale respektują wymagane artefakty i review.</p>
+      <div class="manual-action-grid"><div class="muted">Ładowanie statusów…</div></div>
     `;
     grid.appendChild(card);
-    card.querySelectorAll("[data-manual-action]").forEach(button => {
-      button.addEventListener("click", () => runManualAction(button.dataset.manualAction, button.dataset.label));
-    });
+    refreshManualActions().catch(() => {});
   }
 
   function inject() {
@@ -116,9 +154,12 @@
   inject();
 
   setInterval(async () => {
-    if (pollBusy || state.view !== "tasks" || !state.projectId) return;
+    if (pollBusy || !["tasks", "dashboard"].includes(state.view) || !state.projectId) return;
     const active = (state.ops?.tasks || []).some(task => task.state === "queued" || task.state === "running");
-    if (!active) return;
+    if (!active) {
+      if (state.view === "dashboard") refreshManualActions().catch(() => {});
+      return;
+    }
     pollBusy = true;
     try {
       await loadProjectData();
