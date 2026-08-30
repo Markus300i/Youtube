@@ -41,11 +41,7 @@ def _slug(value: str) -> str:
 
 
 class StudioTaskRunner:
-    """Execute a fixed allow-list of CSP pipeline tasks.
-
-    The runner never executes arbitrary payload commands. GUI tasks map to known
-    CSP modules/scripts only. Long commands write stdout/stderr to a per-task log.
-    """
+    """Execute a fixed allow-list of CSP pipeline tasks."""
 
     def __init__(
         self,
@@ -130,15 +126,15 @@ class StudioTaskRunner:
 
         with StudioStore(self.db_path) as store:
             engine = TaskEngine(store)
-            engine.progress(task_id, 95, stage="finalize")
-            artifact = self._stage_artifact(store, task.project_id, task.stage)
+            engine.progress(task_id, 95, stage="validate_artifacts")
+            artifact, artifacts = self._validate_stage_artifacts(store, task.project_id, task.stage)
             if task.stage != "visual_qa":
                 mark_done(
                     engine,
                     task.project_id,
                     task.stage,
-                    artifact_path=artifact if artifact and artifact.is_file() else None,
-                    metadata={"task_id": task_id},
+                    artifact_path=artifact,
+                    metadata={"task_id": task_id, "artifacts": [str(path) for path in artifacts]},
                 )
                 invalidate_after_stage(
                     engine,
@@ -152,21 +148,54 @@ class StudioTaskRunner:
             "log_path": str(log_path),
             "command": self._display_command(command),
             "artifact": str(artifact) if artifact else None,
+            "artifacts": [str(path) for path in artifacts],
         }
 
-    def _stage_artifact(self, store: StudioStore, project_id: str, stage: str) -> Path | None:
+    def _project_dir(self, store: StudioStore, project_id: str) -> Path:
         project = store.conn.execute("SELECT title FROM projects WHERE project_id=?", (project_id,)).fetchone()
         if project is None:
             raise KeyError(project_id)
-        project_dir = self.output_root / f"{project_id}-{_slug(project['title'])}"
-        candidates = {
-            "tts": [project_dir / "audio" / "voice.wav"],
-            "captions": [project_dir / "subtitles.ass", project_dir / "subtitles.srt"],
-            "sound_design": [project_dir / "audio" / "final_mix.wav"],
-            "opencut_export": [project_dir / "opencut" / "csp-opencut.json"],
-            "render_final": [project_dir / "final.mp4"],
-        }.get(stage, [])
-        return next((path for path in candidates if path.is_file()), candidates[0] if candidates else None)
+        return self.output_root / f"{project_id}-{_slug(project['title'])}"
+
+    @staticmethod
+    def _usable_file(path: Path) -> bool:
+        return path.is_file() and path.stat().st_size > 0
+
+    def _validate_stage_artifacts(
+        self,
+        store: StudioStore,
+        project_id: str,
+        stage: str,
+    ) -> tuple[Path | None, list[Path]]:
+        if stage == "visual_qa":
+            return None, []  # VisualQA owns and validates its checkpoint/report.
+
+        project_dir = self._project_dir(store, project_id)
+        if stage == "tts":
+            required = [project_dir / "audio" / "voice.wav", project_dir / "audio" / "tts-timings.json"]
+            missing = [path for path in required if not self._usable_file(path)]
+            if missing:
+                raise FileNotFoundError("TTS completed without required artifacts: " + ", ".join(str(path) for path in missing))
+            return required[0], required
+
+        if stage == "captions":
+            candidates = [project_dir / "subtitles.ass", project_dir / "subtitles.srt"]
+            existing = [path for path in candidates if self._usable_file(path)]
+            if not existing:
+                raise FileNotFoundError("Captions completed without subtitles.ass or subtitles.srt")
+            return existing[0], existing
+
+        mapping = {
+            "sound_design": project_dir / "audio" / "final_mix.wav",
+            "opencut_export": project_dir / "opencut" / "csp-opencut.json",
+            "render_final": project_dir / "final.mp4",
+        }
+        artifact = mapping.get(stage)
+        if artifact is None:
+            return None, []
+        if not self._usable_file(artifact):
+            raise FileNotFoundError(f"{stage} completed without required artifact: {artifact}")
+        return artifact, [artifact]
 
     def _regenerate_scene(
         self,
@@ -363,3 +392,33 @@ class StudioTaskRunner:
 
 def run_task(task_id: str, *, db_path: str | Path = DEFAULT_DB_PATH, output_root: str | Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     return StudioTaskRunner(db_path, output_root=output_root).run(task_id)
+
+
+def run_task_waiting(
+    task_id: str,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    output_root: str | Path = DEFAULT_OUTPUT_ROOT,
+    poll_seconds: float = 2.0,
+    max_wait_seconds: float = 7200.0,
+) -> dict[str, Any]:
+    """Run one queued task, waiting for a serialized resource such as the GPU."""
+
+    deadline = time.time() + max_wait_seconds
+    while True:
+        result = run_task(task_id, db_path=db_path, output_root=output_root)
+        state = str(result.get("state") or "")
+        if state != "queued":
+            return result
+        if time.time() >= deadline:
+            with StudioStore(db_path) as store:
+                engine = TaskEngine(store)
+                current = engine.get(task_id)
+                if current and current.state == "queued":
+                    return engine.fail(
+                        task_id,
+                        f"Timed out waiting {int(max_wait_seconds)}s for resource {current.resource}",
+                        failed_stage="queue_wait",
+                    ).to_dict()
+                return current.to_dict() if current else result
+        time.sleep(max(0.2, poll_seconds))
