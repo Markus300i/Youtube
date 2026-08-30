@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .asset_manager import AssetManager
+from .pipeline_state import is_stale
 from .providers.base import ChatProvider, ProviderError
 from .store import StudioStore
 from .task_engine import TaskEngine
@@ -88,14 +89,7 @@ class AgentOne:
         checks: list[ReadinessCheck] = []
 
         exact_scene_count = len(scenes) == 8
-        checks.append(
-            ReadinessCheck(
-                "scene_count",
-                exact_scene_count,
-                "8 scen projektu",
-                f"Znaleziono {len(scenes)} scen; CSP Short wymaga dokładnie 8.",
-            )
-        )
+        checks.append(ReadinessCheck("scene_count", exact_scene_count, "8 scen projektu", f"Znaleziono {len(scenes)} scen; CSP Short wymaga dokładnie 8."))
 
         missing_assets: list[int] = []
         missing_files: list[int] = []
@@ -115,96 +109,41 @@ class AgentOne:
             image_detail_parts.append("brak aktywnego assetu: " + ", ".join(map(str, missing_assets)))
         if missing_files:
             image_detail_parts.append("brak pliku na dysku: " + ", ".join(map(str, missing_files)))
-        checks.append(
-            ReadinessCheck(
-                "active_images",
-                images_ok,
-                "Aktywne obrazy scen",
-                "; ".join(image_detail_parts) if image_detail_parts else "8/8 aktywnych obrazów istnieje na dysku.",
-            )
-        )
+        checks.append(ReadinessCheck("active_images", images_ok, "Aktywne obrazy scen", "; ".join(image_detail_parts) if image_detail_parts else "8/8 aktywnych obrazów istnieje na dysku."))
 
         review_ok = exact_scene_count and not review_pending
-        checks.append(
-            ReadinessCheck(
-                "scene_review",
-                review_ok,
-                "Review scen",
-                "Wymagają review: " + ", ".join(map(str, review_pending)) if review_pending else "8/8 scen zatwierdzonych.",
-            )
-        )
+        checks.append(ReadinessCheck("scene_review", review_ok, "Review scen", "Wymagają review: " + ", ".join(map(str, review_pending)) if review_pending else "8/8 scen zatwierdzonych."))
 
         audio_dir = project_dir / "audio"
         voice = audio_dir / "voice.wav"
         timings = audio_dir / "tts-timings.json"
         tts_ok = voice.is_file() and timings.is_file() and self._timings_cover_scenes(timings, scenes)
-        checks.append(
-            ReadinessCheck(
-                "tts",
-                tts_ok,
-                "Narrator + dokładne timingi",
-                "voice.wav i kompletne tts-timings.json są gotowe." if tts_ok else "Brakuje voice.wav lub kompletnych timingów 8 scen.",
-            )
-        )
+        checks.append(ReadinessCheck("tts", tts_ok, "Narrator + dokładne timingi", "voice.wav i kompletne tts-timings.json są gotowe." if tts_ok else "Brakuje voice.wav lub kompletnych timingów 8 scen."))
 
         ass = project_dir / "subtitles.ass"
         srt = project_dir / "subtitles.srt"
-        captions_ok = ass.is_file() or srt.is_file()
-        checks.append(
-            ReadinessCheck(
-                "captions",
-                captions_ok,
-                "Napisy",
-                "Napisy ASS/SRT gotowe." if captions_ok else "Brak subtitles.ass i subtitles.srt.",
-            )
-        )
+        captions_stale = is_stale(self.tasks, project_id, "captions")
+        captions_ok = (ass.is_file() or srt.is_file()) and not captions_stale
+        checks.append(ReadinessCheck("captions", captions_ok, "Napisy", "Napisy ASS/SRT gotowe." if captions_ok else ("Napisy są nieaktualne po zmianie TTS." if captions_stale else "Brak subtitles.ass i subtitles.srt.")))
 
         final_mix = audio_dir / "final_mix.wav"
-        sound_ok = final_mix.is_file()
-        checks.append(
-            ReadinessCheck(
-                "sound_design",
-                sound_ok,
-                "Finalny miks audio",
-                "final_mix.wav gotowy." if sound_ok else "Brak audio/final_mix.wav.",
-            )
-        )
+        sound_stale = is_stale(self.tasks, project_id, "sound_design")
+        sound_ok = final_mix.is_file() and not sound_stale
+        checks.append(ReadinessCheck("sound_design", sound_ok, "Finalny miks audio", "final_mix.wav gotowy." if sound_ok else ("Miks audio jest nieaktualny po zmianie TTS." if sound_stale else "Brak audio/final_mix.wav.")))
 
         visual_checkpoint = self.tasks.get_checkpoint(project_id, "visual_qa")
         visual_qa_ok = bool(visual_checkpoint and visual_checkpoint["state"] == "done")
-        checks.append(
-            ReadinessCheck(
-                "visual_qa",
-                visual_qa_ok,
-                "Visual QA",
-                "Visual QA zakończone." if visual_qa_ok else "Visual QA jeszcze nie zostało wykonane.",
-                blocking=False,
-            )
-        )
+        checks.append(ReadinessCheck("visual_qa", visual_qa_ok, "Visual QA", "Visual QA zakończone." if visual_qa_ok else "Visual QA jeszcze nie zostało wykonane lub jest nieaktualne.", blocking=False))
 
         opencut_manifest = project_dir / "opencut" / "csp-opencut.json"
-        opencut_ok = opencut_manifest.is_file()
-        checks.append(
-            ReadinessCheck(
-                "opencut_export",
-                opencut_ok,
-                "OpenCut interchange",
-                "Manifest OpenCut gotowy." if opencut_ok else "Brak opencut/csp-opencut.json.",
-                blocking=False,
-            )
-        )
+        opencut_stale = is_stale(self.tasks, project_id, "opencut_export")
+        opencut_ok = opencut_manifest.is_file() and not opencut_stale
+        checks.append(ReadinessCheck("opencut_export", opencut_ok, "OpenCut interchange", "Manifest OpenCut gotowy." if opencut_ok else ("Manifest OpenCut jest nieaktualny." if opencut_stale else "Brak opencut/csp-opencut.json."), blocking=False))
 
         final_mp4 = project_dir / "final.mp4"
-        final_exists = final_mp4.is_file() and final_mp4.stat().st_size > 0
-        checks.append(
-            ReadinessCheck(
-                "final_render",
-                final_exists,
-                "Final MP4",
-                "final.mp4 istnieje." if final_exists else "Finalny render nie istnieje jeszcze.",
-                blocking=False,
-            )
-        )
+        render_stale = is_stale(self.tasks, project_id, "render_final")
+        final_exists = final_mp4.is_file() and final_mp4.stat().st_size > 0 and not render_stale
+        checks.append(ReadinessCheck("final_render", final_exists, "Final MP4", "final.mp4 istnieje i jest aktualny." if final_exists else ("final.mp4 istnieje, ale jest nieaktualny." if render_stale and final_mp4.is_file() else "Finalny render nie istnieje jeszcze."), blocking=False))
 
         assets_ready = exact_scene_count and images_ok
         production_ready = assets_ready and tts_ok and captions_ok and sound_ok
@@ -234,17 +173,7 @@ class AgentOne:
         else:
             stage = "assets"
 
-        return AgentOneReport(
-            project_id=project_id,
-            title=project["title"],
-            checks=checks,
-            next_action=next_action,
-            next_action_detail=detail,
-            stage=stage,
-            assets_ready=assets_ready,
-            production_ready=production_ready,
-            final_ready=final_ready,
-        )
+        return AgentOneReport(project_id=project_id, title=project["title"], checks=checks, next_action=next_action, next_action_detail=detail, stage=stage, assets_ready=assets_ready, production_ready=production_ready, final_ready=final_ready)
 
     @staticmethod
     def _timings_cover_scenes(path: Path, scenes) -> bool:
@@ -258,20 +187,7 @@ class AgentOne:
             return False
 
     @staticmethod
-    def _next_action(
-        *,
-        exact_scene_count: bool,
-        images_ok: bool,
-        missing_assets: list[int],
-        missing_files: list[int],
-        review_pending: list[int],
-        tts_ok: bool,
-        captions_ok: bool,
-        sound_ok: bool,
-        visual_qa_ok: bool,
-        opencut_ok: bool,
-        final_exists: bool,
-    ) -> tuple[str, str]:
+    def _next_action(*, exact_scene_count: bool, images_ok: bool, missing_assets: list[int], missing_files: list[int], review_pending: list[int], tts_ok: bool, captions_ok: bool, sound_ok: bool, visual_qa_ok: bool, opencut_ok: bool, final_exists: bool) -> tuple[str, str]:
         if not exact_scene_count:
             return "fix_scene_plan", "Projekt musi mieć dokładnie 8 scen."
         if not images_ok:
@@ -311,15 +227,7 @@ class AgentOne:
             temperature=0.1,
             max_tokens=800,
         )
-        return {
-            "report": safe_state,
-            "assistant": {
-                "provider": response.provider,
-                "model": response.model,
-                "text": response.text,
-                "usage": response.usage,
-            },
-        }
+        return {"report": safe_state, "assistant": {"provider": response.provider, "model": response.model, "text": response.text, "usage": response.usage}}
 
     def enqueue_next(self, project_id: str) -> dict[str, Any]:
         report = self.inspect(project_id)
@@ -335,18 +243,10 @@ class AgentOne:
         if mapped is None:
             return {"queued": False, "reason": report.next_action, "report": report.to_dict()}
         stage, resource = mapped
-        existing = [
-            task for task in self.tasks.list(project_id)
-            if task.stage == stage and task.state in {"queued", "running"}
-        ]
+        existing = [task for task in self.tasks.list(project_id) if task.stage == stage and task.state in {"queued", "running"}]
         if existing:
             return {"queued": False, "reason": "already_queued", "task": existing[0].to_dict(), "report": report.to_dict()}
-        task = self.tasks.submit(
-            project_id,
-            stage,
-            resource=resource,
-            payload={"source": "agent_one", "readiness_action": report.next_action},
-        )
+        task = self.tasks.submit(project_id, stage, resource=resource, payload={"source": "agent_one", "readiness_action": report.next_action})
         return {"queued": True, "task": task.to_dict(), "report": report.to_dict()}
 
 
