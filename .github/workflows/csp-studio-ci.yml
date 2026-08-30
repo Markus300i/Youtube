@@ -67,6 +67,7 @@ jobs:
           node --check csp_studio/web/app.js
           node --check csp_studio/web/actions.js
           node --check csp_studio/web/flow.js
+          node --check csp_studio/web/flow_v2.js
 
   powershell-syntax:
     runs-on: windows-latest
