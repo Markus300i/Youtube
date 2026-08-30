@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -165,6 +166,33 @@ class StudioTaskRunner:
             temp_output = Path(tmp) / "output"
             env = dict(base_env)
             env["CSP_OUTPUT_DIR"] = str(temp_output)
+
+            with StudioStore(self.db_path) as store:
+                project = store.conn.execute("SELECT title FROM projects WHERE project_id=?", (project_id,)).fetchone()
+                if project is None:
+                    raise KeyError(project_id)
+                slug = f"{project_id}-{_slug(project['title'])}"
+                real_images = self.output_root / slug / "images"
+                sandbox_images = temp_output / slug / "images"
+                sandbox_images.mkdir(parents=True, exist_ok=True)
+                copied_refs: list[int] = []
+                for scene in store.list_scenes(project_id):
+                    if scene.scene_id == scene_id:
+                        continue
+                    source = real_images / f"scene-{scene.scene_id:02d}.png"
+                    if not source.is_file() or source.stat().st_size <= 0:
+                        continue
+                    shutil.copy2(source, sandbox_images / source.name)
+                    copied_refs.append(scene.scene_id)
+                TaskEngine(store).progress(task_id, 15, stage="prepare_references")
+
+            with log_path.open("a", encoding="utf-8", errors="replace") as log:
+                log.write(
+                    "REFERENCE SCENES COPIED: "
+                    + (", ".join(str(item) for item in copied_refs) if copied_refs else "none")
+                    + "\n"
+                )
+
             command = [self.python, str(ROOT / "scripts" / "generate_scene.py"), str(snapshot), str(scene_id)]
             with StudioStore(self.db_path) as store:
                 TaskEngine(store).progress(task_id, 20, stage="generate_image")
@@ -195,6 +223,7 @@ class StudioTaskRunner:
                     "returncode": returncode,
                     "log_path": str(log_path),
                     "command": self._display_command(command),
+                    "reference_scenes": copied_refs,
                     "asset": asset.to_dict(),
                 }
 
