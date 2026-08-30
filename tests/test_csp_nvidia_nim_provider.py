@@ -114,6 +114,58 @@ class NvidiaNimProviderTests(unittest.TestCase):
             self.assertEqual(result.text, "Frames are too similar.")
             client.close()
 
+    def test_vision_retries_one_read_timeout(self) -> None:
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise httpx.ReadTimeout("slow vision response", request=request)
+            return httpx.Response(
+                200,
+                json={
+                    "model": "mock-vlm",
+                    "choices": [{"message": {"content": "QA complete"}}],
+                },
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "scene.png"
+            Image.new("RGB", (16, 16), "white").save(image)
+            client = httpx.Client(transport=httpx.MockTransport(handler))
+            provider = NvidiaNimProvider(
+                api_key="key",
+                base_url="https://nim.test/v1",
+                vision_model="mock-vlm",
+                vision_timeout=240,
+                vision_retries=1,
+                client=client,
+            )
+            result = provider.analyze_images("Review", [str(image)])
+            self.assertEqual(calls, 2)
+            self.assertEqual(result.text, "QA complete")
+            client.close()
+
+    def test_vision_timeout_error_is_actionable_after_retries(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("still slow", request=request)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "scene.png"
+            Image.new("RGB", (16, 16), "white").save(image)
+            client = httpx.Client(transport=httpx.MockTransport(handler))
+            provider = NvidiaNimProvider(
+                api_key="key",
+                base_url="https://nim.test/v1",
+                vision_timeout=123,
+                vision_retries=1,
+                client=client,
+            )
+            with self.assertRaisesRegex(ProviderError, r"timed out after 123s.*2 attempt"):
+                provider.analyze_images("Review", [str(image)])
+            client.close()
+
     def test_embeddings_preserve_backend_index_order(self) -> None:
         seen = {}
 
