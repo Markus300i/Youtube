@@ -13,6 +13,7 @@ import yaml
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
+from .agent_one import AgentOne
 from .scene_ops import SceneOperations
 from .store import StudioStore
 from .task_engine import TaskEngine
@@ -29,9 +30,48 @@ MANUAL_ACTIONS: dict[str, tuple[str, str]] = {
     "tts": ("tts", "gpu"),
     "captions": ("captions", "gpu"),
     "sound_design": ("sound_design", "cpu"),
-    "visual_qa": ("visual_qa", "gpu"),
+    "visual_qa": ("visual_qa", "network"),
     "opencut_export": ("opencut_export", "io"),
     "render_final": ("render_final", "gpu"),
+}
+
+ACTION_META: dict[str, dict[str, Any]] = {
+    "tts": {
+        "label": "TTS",
+        "detail": "Chatterbox narration",
+        "check": "tts",
+        "requires": (),
+    },
+    "captions": {
+        "label": "Captions",
+        "detail": "Whisper subtitles",
+        "check": "captions",
+        "requires": ("tts",),
+    },
+    "sound_design": {
+        "label": "Sound",
+        "detail": "Final audio mix",
+        "check": "sound_design",
+        "requires": ("tts",),
+    },
+    "visual_qa": {
+        "label": "Visual QA",
+        "detail": "NVIDIA visual review",
+        "check": "visual_qa",
+        "requires": ("active_images",),
+    },
+    "opencut_export": {
+        "label": "OpenCut",
+        "detail": "Export interchange",
+        "check": "opencut_export",
+        "requires": ("active_images", "tts", "captions", "sound_design"),
+    },
+    "render_final": {
+        "label": "Render Final",
+        "detail": "FFmpeg final MP4",
+        "check": "final_render",
+        "requires": ("active_images", "tts", "captions", "sound_design", "scene_review"),
+    },
 }
 
 
@@ -106,6 +146,55 @@ def _quick_snapshot(base_snapshot: Path, scene_id: int, target: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return target
+
+
+def _action_statuses(store: StudioStore, project_id: str) -> list[dict[str, Any]]:
+    report = AgentOne(store, output_root=OUTPUT_ROOT).inspect(project_id)
+    checks = {check.key: check for check in report.checks}
+    engine = TaskEngine(store)
+    tasks = engine.list(project_id)
+    output: list[dict[str, Any]] = []
+
+    for action, (stage, resource) in MANUAL_ACTIONS.items():
+        meta = ACTION_META[action]
+        stage_tasks = [task for task in tasks if task.stage == stage]
+        latest = stage_tasks[0] if stage_tasks else None
+        active = next((task for task in stage_tasks if task.state in {"queued", "running"}), None)
+        missing = [
+            key for key in meta["requires"]
+            if key not in checks or not checks[key].ok
+        ]
+        check = checks.get(str(meta["check"]))
+
+        if active is not None:
+            state = active.state
+        elif missing:
+            state = "blocked"
+        elif check is not None and check.ok:
+            state = "done"
+        elif latest is not None and latest.state == "failed":
+            state = "failed"
+        else:
+            state = "ready"
+
+        output.append(
+            {
+                "action": action,
+                "stage": stage,
+                "resource": resource,
+                "label": meta["label"],
+                "detail": meta["detail"],
+                "state": state,
+                "can_run": not missing and active is None,
+                "requirements": list(meta["requires"]),
+                "missing_requirements": missing,
+                "missing_labels": [checks[key].label if key in checks else key for key in missing],
+                "check_ok": bool(check and check.ok),
+                "latest_task": latest.to_dict() if latest else None,
+                "active_task": active.to_dict() if active else None,
+            }
+        )
+    return output
 
 
 def run_quick_regenerate(task_id: str) -> dict[str, Any]:
@@ -196,12 +285,31 @@ def actions_js():
     return FileResponse(WEB_DIR / "actions.js", media_type="application/javascript")
 
 
+@router.get("/api/projects/{project_id}/actions")
+def action_status(project_id: str):
+    with StudioStore(DB_PATH) as store:
+        _project_title(store, project_id)
+        return {"project_id": project_id, "actions": _action_statuses(store, project_id)}
+
+
 @router.post("/api/projects/{project_id}/scenes/{scene_id}/quick-regenerate")
 def quick_regenerate(project_id: str, scene_id: int, background_tasks: BackgroundTasks):
     with StudioStore(DB_PATH) as store:
         if store.get_scene(project_id, scene_id) is None:
             raise HTTPException(404, f"Unknown scene: {project_id}:{scene_id}")
-        task = TaskEngine(store).submit(
+        engine = TaskEngine(store)
+        active = next(
+            (
+                task for task in engine.list(project_id)
+                if task.stage == "regenerate_image_quick"
+                and task.scene_id == scene_id
+                and task.state in {"queued", "running"}
+            ),
+            None,
+        )
+        if active is not None:
+            return {"scheduled": False, "reason": "already_active", "task": active.to_dict()}
+        task = engine.submit(
             project_id,
             "regenerate_image_quick",
             scene_id=scene_id,
@@ -218,14 +326,30 @@ def manual_action(project_id: str, action: str, background_tasks: BackgroundTask
     if mapping is None:
         raise HTTPException(400, f"Unsupported manual action: {action}")
     stage, resource = mapping
+
     with StudioStore(DB_PATH) as store:
-        if store.conn.execute("SELECT 1 FROM projects WHERE project_id=?", (project_id,)).fetchone() is None:
-            raise HTTPException(404, f"Unknown project: {project_id}")
+        _project_title(store, project_id)
+        statuses = {item["action"]: item for item in _action_statuses(store, project_id)}
+        status = statuses[action]
+        if status["missing_requirements"]:
+            raise HTTPException(
+                409,
+                "Brak wymaganych etapów: " + ", ".join(status["missing_labels"]),
+            )
+        if status["active_task"] is not None:
+            return {
+                "scheduled": False,
+                "reason": "already_active",
+                "task": status["active_task"],
+                "action": status,
+            }
+
         task = TaskEngine(store).submit(
             project_id,
             stage,
             resource=resource,
             payload={"source": "manual-actions-panel"},
         )
+
     background_tasks.add_task(run_task, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
-    return {"scheduled": True, "task": task.to_dict()}
+    return {"scheduled": True, "task": task.to_dict(), "action": status}
