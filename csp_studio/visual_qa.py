@@ -22,6 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser().resolve()
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 SCENE_IDS = tuple(range(1, 9))
+PLACEHOLDER_NOTE_PAIRS = {
+    ("specific issue", "specific fix"),
+    ("issue", "recommendation"),
+}
 
 
 def _slug(value: str) -> str:
@@ -168,6 +172,8 @@ class VisualQA:
             recommendation = str(item.get("recommendation") or "").strip()
             if not issue and not recommendation:
                 continue
+            if (issue.lower(), recommendation.lower()) in PLACEHOLDER_NOTE_PAIRS:
+                continue
             severity = str(item.get("severity") or "info").lower()
             if severity not in {"info", "warning", "critical"}:
                 severity = "warning"
@@ -267,8 +273,7 @@ class VisualQA:
             "All six top-level keys are REQUIRED and score MUST be an integer from 0 to 100. "
             "Do not emit placeholder or empty scene_notes; omit a scene note unless issue or recommendation contains useful text. "
             "Exact shape:\n"
-            "{\"score\":75,\"summary\":\"short assessment\",\"warnings\":[],\"continuity\":[],\"monotony\":[],"
-            "\"scene_notes\":[{\"scene_id\":4,\"severity\":\"warning\",\"issue\":\"specific issue\",\"recommendation\":\"specific fix\"}]}\n"
+            "{\"score\":75,\"summary\":\"short assessment\",\"warnings\":[],\"continuity\":[],\"monotony\":[],\"scene_notes\":[]}\n"
             f"Project: {project['title']}\nScene reviews: {json.dumps(compact, ensure_ascii=False)}\n"
             f"Shot Director score: {shot_score}; warnings: {json.dumps(shot_warnings, ensure_ascii=False)}"
         )
