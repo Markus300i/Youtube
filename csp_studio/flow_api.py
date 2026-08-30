@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .new_short_wizard import NewShortWizard, WizardValidationError
@@ -13,6 +14,7 @@ from .store import StudioStore
 from .visual_bible import VALID_KINDS, VisualBible, VisualBibleEntity
 
 ROOT = Path(__file__).resolve().parents[1]
+WEB_DIR = Path(__file__).resolve().parent / "web"
 OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser().resolve()
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 SHORTS_DIR = ROOT / "shorts"
@@ -40,6 +42,11 @@ def _production_payload(store: StudioStore, project_id: str) -> dict[str, Any]:
     run = coordinator.status(project_id)
     report = coordinator.agent.inspect(project_id)
     return {"run": run.to_dict(), "agent": report.to_dict()}
+
+
+@router.get("/flow.js")
+def flow_js():
+    return FileResponse(WEB_DIR / "flow.js", media_type="application/javascript")
 
 
 @router.get("/api/projects/{project_id}/production-run")
