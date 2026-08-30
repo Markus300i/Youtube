@@ -96,7 +96,7 @@ If any step fails, checkpoint state becomes `failed` with safe error metadata.
 ## Run
 
 ```powershell
-cd C:\Users\pat30\Youtube
+cd C:\CSP\Youtube
 $py = "C:\CSP\venv\Scripts\python.exe"
 $env:CSP_OUTPUT_DIR = "C:\CSP\output"
 $env:NVIDIA_API_KEY = "nvapi-..."
