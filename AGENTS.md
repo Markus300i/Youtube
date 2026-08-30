@@ -61,7 +61,7 @@ It is PR #11 and is stacked on PR #10 rather than directly on `main`. Do not cas
 Primary Windows environment:
 
 ```text
-Repo:        C:\Users\pat30\Youtube
+Repo:        C:\CSP\Youtube
 Python:      C:\CSP\venv\Scripts\python.exe
 Output:      C:\CSP\output
 SQLite:      C:\CSP\output\csp-studio.db
@@ -77,7 +77,7 @@ Use PowerShell examples for local instructions.
 Typical setup:
 
 ```powershell
-cd C:\Users\pat30\Youtube
+cd C:\CSP\Youtube
 $py = "C:\CSP\venv\Scripts\python.exe"
 $env:CSP_OUTPUT_DIR = "C:\CSP\output"
 ```
