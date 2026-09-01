@@ -12,6 +12,16 @@ from csp_studio.flow_api import router
 
 
 class FlowApiTests(unittest.TestCase):
+    def test_flow_scripts_are_not_browser_cached(self) -> None:
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+        for path in ("/flow.js", "/flow-v2.js"):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("no-store", response.headers.get("cache-control", ""))
+            self.assertEqual(response.headers.get("pragma"), "no-cache")
+
     def test_wizard_production_run_and_visual_bible_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
