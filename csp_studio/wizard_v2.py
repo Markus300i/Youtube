@@ -58,16 +58,25 @@ def _setting_int(name: str, default: int) -> int:
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
+    """Return the first complete JSON object and ignore trailing model chatter/data.
+
+    NIM models occasionally append prose or even a second JSON value after an
+    otherwise valid response.  CSP Studio only accepts the first complete object;
+    it never merges multiple values or guesses missing fields.
+    """
+
     value = str(text or "").strip()
     if value.startswith("```"):
         value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
-        value = re.sub(r"\s*```$", "", value)
+
     start = value.find("{")
-    end = value.rfind("}")
-    if start < 0 or end <= start:
+    if start < 0:
         raise WizardV2Error("AI draft did not contain a JSON object")
+
+    candidate = value[start:]
+    decoder = json.JSONDecoder()
     try:
-        payload = json.loads(value[start : end + 1])
+        payload, _end = decoder.raw_decode(candidate)
     except json.JSONDecodeError as exc:
         raise WizardV2Error(f"AI draft returned invalid JSON: {exc}") from exc
     if not isinstance(payload, dict):
