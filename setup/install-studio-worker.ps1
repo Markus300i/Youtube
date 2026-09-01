@@ -52,7 +52,7 @@ $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 
-$watchdogArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -TaskName `"$TaskName`""
+$watchdogArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -TaskName `"$TaskName`" -Repo `"$Repo`" -Python `"$Python`" -OutputRoot `"$OutputRoot`" -Db `"$Db`""
 $watchdogAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $watchdogArguments -WorkingDirectory $Repo
 $watchdogTrigger = New-ScheduledTaskTrigger `
     -Once `
@@ -76,5 +76,5 @@ Write-Host "Repo:     $Repo"
 Write-Host "Python:   $Python"
 Write-Host "DB:       $Db"
 Write-Host "Output:   $OutputRoot"
-Write-Host "Watchdog: every 1 minute; restarts worker when task state is Ready"
+Write-Host "Watchdog: every 1 minute; detects worker process and launches a fresh process if missing"
 Write-Host "Status:   Get-ScheduledTask -TaskName '$TaskName','$WatchdogTaskName'"
