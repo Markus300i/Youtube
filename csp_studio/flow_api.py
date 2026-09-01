@@ -23,6 +23,7 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 OUTPUT_ROOT = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser().resolve()
 DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(OUTPUT_ROOT / "csp-studio.db"))).expanduser().resolve()
 SHORTS_DIR = ROOT / "shorts"
+NO_STORE_HEADERS = {"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"}
 
 router = APIRouter()
 
@@ -58,12 +59,12 @@ def _production_payload(store: StudioStore, project_id: str) -> dict[str, Any]:
 
 @router.get("/flow.js")
 def flow_js():
-    return FileResponse(WEB_DIR / "flow.js", media_type="application/javascript")
+    return FileResponse(WEB_DIR / "flow.js", media_type="application/javascript", headers=NO_STORE_HEADERS)
 
 
 @router.get("/flow-v2.js")
 def flow_v2_js():
-    return FileResponse(WEB_DIR / "flow_v2.js", media_type="application/javascript")
+    return FileResponse(WEB_DIR / "flow_v2.js", media_type="application/javascript", headers=NO_STORE_HEADERS)
 
 
 @router.get("/api/providers/nvidia-nim/status")
