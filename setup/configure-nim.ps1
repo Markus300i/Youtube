@@ -34,19 +34,43 @@ $lines += "NVIDIA_API_KEY=$key"
 [System.IO.File]::WriteAllLines($EnvFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
 
 try {
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $systemSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+    $adminsSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    $usersSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
+    $authenticatedSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-11")
+
     $acl = New-Object System.Security.AccessControl.FileSecurity
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, "FullControl", "Allow")
+    $acl.SetOwner($currentSid)
     $acl.SetAccessRuleProtection($true, $false)
-    $acl.AddAccessRule($rule)
+
+    foreach ($sid in @($currentSid, $systemSid, $adminsSid)) {
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $sid,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        $acl.AddAccessRule($rule)
+    }
+
     Set-Acl -LiteralPath $EnvFile -AclObject $acl
+
+    $verified = Get-Acl -LiteralPath $EnvFile
+    $badRules = @($verified.Access | Where-Object {
+        ($_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) -eq $usersSid) -or
+        ($_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) -eq $authenticatedSid)
+    })
+    if ($badRules.Count -gt 0) {
+        throw "Unsafe broad ACL entries remain on .env"
+    }
 }
 catch {
-    Write-Warning "Could not tighten .env ACL automatically. Review permissions manually."
+    throw "Could not secure .env ACL: $($_.Exception.Message)"
 }
 
 $key = $null
 Write-Host "NVIDIA NIM configuration saved locally."
 Write-Host "File: $EnvFile"
+Write-Host "ACL: current user, SYSTEM and Administrators only."
 Write-Host "The key was not printed and is ignored by Git."
 Write-Host "Restart CSP Studio only if an already-open provider instance was created before configuration."
