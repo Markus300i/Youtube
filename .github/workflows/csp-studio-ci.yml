@@ -49,6 +49,7 @@ jobs:
             tests.test_csp_production_run \
             tests.test_csp_new_short_wizard \
             tests.test_csp_wizard_v2 \
+            tests.test_csp_wizard_json_extract \
             tests.test_csp_local_env \
             tests.test_csp_visual_bible \
             tests.test_csp_visual_bible_generation \
