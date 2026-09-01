@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import unicodedata
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .import_short import project_from_short
+from .local_env import get_local_setting
 from .new_short_wizard import NewShortWizard, WizardValidationError, normalize_wizard_payload
 from .providers.base import ChatProvider
 from .shot_director import ShotDirector
@@ -15,6 +17,8 @@ from .store import StudioStore
 from .visual_bible import VALID_KINDS, VisualBible, VisualBibleEntity
 
 ENTITY_KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$")
+DEFAULT_WIZARD_NIM_TIMEOUT = 180.0
+DEFAULT_WIZARD_NIM_RETRIES = 1
 
 
 class WizardV2Error(ValueError):
@@ -25,6 +29,32 @@ def _slug(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", ascii_value).strip("-").lower()
     return slug[:64] or "new-short"
+
+
+def _setting_float(name: str, default: float) -> float:
+    raw = get_local_setting(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise WizardV2Error(f"{name} must be a number") from exc
+    if value <= 0:
+        raise WizardV2Error(f"{name} must be greater than zero")
+    return value
+
+
+def _setting_int(name: str, default: int) -> int:
+    raw = get_local_setting(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise WizardV2Error(f"{name} must be an integer") from exc
+    if value < 0:
+        raise WizardV2Error(f"{name} cannot be negative")
+    return value
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -129,6 +159,21 @@ class WizardV2:
     def __init__(self, provider: ChatProvider):
         self.provider = provider
 
+    def _chat(self, messages: list[dict[str, Any]]):
+        kwargs: dict[str, Any] = {
+            "temperature": 0.35,
+            "max_tokens": 3800,
+        }
+        try:
+            parameters = inspect.signature(self.provider.chat).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "request_timeout" in parameters:
+            kwargs["request_timeout"] = _setting_float("CSP_WIZARD_NIM_TIMEOUT", DEFAULT_WIZARD_NIM_TIMEOUT)
+        if "retries" in parameters:
+            kwargs["retries"] = _setting_int("CSP_WIZARD_NIM_RETRIES", DEFAULT_WIZARD_NIM_RETRIES)
+        return self.provider.chat(messages, **kwargs)
+
     def draft(self, topic: str, *, project_id: str | None = None, title: str | None = None) -> WizardV2Draft:
         topic = str(topic or "").strip()
         if not topic:
@@ -179,11 +224,7 @@ Zwróć JSON dokładnie w strukturze:
   }}
 }}
 """.strip()
-        response = self.provider.chat(
-            [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-            temperature=0.45,
-            max_tokens=5000,
-        )
+        response = self._chat([{"role": "system", "content": system}, {"role": "user", "content": prompt}])
         envelope = _extract_json_object(response.text)
         project_raw = envelope.get("project")
         if not isinstance(project_raw, dict):
