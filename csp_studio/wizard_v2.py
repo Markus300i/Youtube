@@ -174,57 +174,15 @@ class WizardV2:
             kwargs["retries"] = _setting_int("CSP_WIZARD_NIM_RETRIES", DEFAULT_WIZARD_NIM_RETRIES)
         return self.provider.chat(messages, **kwargs)
 
-    def draft(self, topic: str, *, project_id: str | None = None, title: str | None = None) -> WizardV2Draft:
-        topic = str(topic or "").strip()
-        if not topic:
-            raise WizardV2Error("topic is required")
-        requested_id = str(project_id or "").strip()
-        requested_title = str(title or "").strip()
-        system = (
-            "Tworzysz WYŁĄCZNIE oryginalne, fikcyjne YouTube Shorts dla kanału Ciemna Strona Polski. "
-            "Akcja ma być osadzona we współczesnych polskich realiach i mieć ton spokojnego thrillera dokumentalnego. "
-            "Nie przedstawiaj fikcji jako prawdziwego wydarzenia, nie używaj prawdziwych ofiar ani nierozwiązanych spraw jako faktów. "
-            "Zwróć wyłącznie poprawny JSON, bez markdownu, bez analizy i bez komentarzy."
-        )
-        prompt = f"""
-POMYSŁ UŻYTKOWNIKA:
-{topic}
-
-Przygotuj jeden draft Shorta. Wymagania:
-- hook w pierwszych 2 sekundach i natychmiastowe pytanie/napięcie,
-- jedna główna tajemnica, rosnące napięcie, mocny twist w scenie 8,
-- naturalny polski język narracji,
-- narration 70-160 słów,
-- dokładnie 8 scen, id 1..8,
-- każda scena: krótki text narracyjny oraz szczegółowy prompt obrazu 9:16,
-- fotorealistyczny polski thriller dokumentalny, bez gore, bez nadnaturalnego potwora,
-- continuity_refs używaj do stabilnych nazw encji, np. night_guard, station_platform,
-- Visual Bible ma zawierać 1 globalny style oraz tylko potrzebne character/location/object/rule,
-- style i rule są globalne; assignments mają przypisywać tylko encje scenowe do scen.
-
-Zwróć JSON dokładnie w strukturze:
-{{
-  "project": {{
-    "id": "stable-slug",
-    "title": "...",
-    "series": "Ciemna Strona Polski",
-    "fictional": true,
-    "status": "draft",
-    "narration": "...",
-    "visual_style": "...",
-    "scenes": [
-      {{"id":1,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}}
-    ]
-  }},
-  "visual_bible": {{
-    "entities": [
-      {{"entity_key":"global_style","kind":"style","name":"Global Style","description":"...","prompt_fragment":"...","metadata":{{}},"active":true}}
-    ],
-    "assignments": {{"1":["entity_key"],"2":[]}}
-  }}
-}}
-""".strip()
-        response = self._chat([{"role": "system", "content": system}, {"role": "user", "content": prompt}])
+    def _validated_result(
+        self,
+        response,
+        *,
+        topic: str,
+        requested_id: str,
+        requested_title: str,
+        repairs: int,
+    ) -> WizardV2Draft:
         envelope = _extract_json_object(response.text)
         project_raw = envelope.get("project")
         if not isinstance(project_raw, dict):
@@ -255,8 +213,110 @@ Zwróć JSON dokładnie w strukturze:
                 "name": response.provider,
                 "model": response.model,
                 "usage": dict(response.usage),
+                "repairs": repairs,
             },
         )
+
+    def draft(self, topic: str, *, project_id: str | None = None, title: str | None = None) -> WizardV2Draft:
+        topic = str(topic or "").strip()
+        if not topic:
+            raise WizardV2Error("topic is required")
+        requested_id = str(project_id or "").strip()
+        requested_title = str(title or "").strip()
+        system = (
+            "Tworzysz WYŁĄCZNIE oryginalne, fikcyjne YouTube Shorts dla kanału Ciemna Strona Polski. "
+            "Akcja ma być osadzona we współczesnych polskich realiach i mieć ton spokojnego thrillera dokumentalnego. "
+            "Nie przedstawiaj fikcji jako prawdziwego wydarzenia, nie używaj prawdziwych ofiar ani nierozwiązanych spraw jako faktów. "
+            "Zwróć wyłącznie jeden poprawny JSON, bez markdownu, bez analizy i bez komentarzy. "
+            "Tablica project.scenes MUSI mieć dokładnie 8 elementów o id 1,2,3,4,5,6,7,8."
+        )
+        prompt = f"""
+POMYSŁ UŻYTKOWNIKA:
+{topic}
+
+Przygotuj jeden draft Shorta. Wymagania:
+- hook w pierwszych 2 sekundach i natychmiastowe pytanie/napięcie,
+- jedna główna tajemnica, rosnące napięcie, mocny twist w scenie 8,
+- naturalny polski język narracji,
+- narration 70-160 słów,
+- DOKŁADNIE 8 scen; ani 7, ani 9; id kolejno 1..8,
+- każda scena: krótki text narracyjny oraz szczegółowy prompt obrazu 9:16,
+- fotorealistyczny polski thriller dokumentalny, bez gore, bez nadnaturalnego potwora,
+- continuity_refs używaj do stabilnych nazw encji, np. night_guard, station_platform,
+- Visual Bible ma zawierać 1 globalny style oraz tylko potrzebne character/location/object/rule,
+- style i rule są globalne; assignments mają przypisywać tylko encje scenowe do scen.
+
+Zwróć JSON dokładnie w strukturze:
+{{
+  "project": {{
+    "id": "stable-slug",
+    "title": "...",
+    "series": "Ciemna Strona Polski",
+    "fictional": true,
+    "status": "draft",
+    "narration": "...",
+    "visual_style": "...",
+    "scenes": [
+      {{"id":1,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":2,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":3,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":4,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":5,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":6,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":7,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}},
+      {{"id":8,"text":"...","prompt":"...","motion":"static","continuity_refs":["..."],"render":{{"mode":"generate"}}}}
+    ]
+  }},
+  "visual_bible": {{
+    "entities": [
+      {{"entity_key":"global_style","kind":"style","name":"Global Style","description":"...","prompt_fragment":"...","metadata":{{}},"active":true}}
+    ],
+    "assignments": {{"1":["entity_key"],"2":[],"3":[],"4":[],"5":[],"6":[],"7":[],"8":[]}}
+  }}
+}}
+""".strip()
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        response = self._chat(messages)
+        try:
+            return self._validated_result(
+                response,
+                topic=topic,
+                requested_id=requested_id,
+                requested_title=requested_title,
+                repairs=0,
+            )
+        except WizardV2Error as first_error:
+            repair_prompt = (
+                "Poprzedni JSON nie przeszedł deterministycznej walidacji CSP Studio. "
+                f"BŁĄD WALIDACJI: {first_error}. "
+                "Napraw wyłącznie strukturę i wymagane pola, zachowując sens historii. "
+                "Najważniejsze: project.scenes musi zawierać dokładnie 8 scen o id 1..8; "
+                "narration musi mieć 70-160 słów; fictional musi być true; każda scena musi mieć text, prompt, "
+                "continuity_refs listę i render.mode=generate; Visual Bible assignments mogą wskazywać tylko istniejące entity_key. "
+                "Zwróć WYŁĄCZNIE cały poprawiony JSON, bez wyjaśnień.\n\n"
+                "POPRZEDNIA ODPOWIEDŹ:\n"
+                + response.text
+            )
+            repaired = self._chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response.text},
+                    {"role": "user", "content": repair_prompt},
+                ]
+            )
+            try:
+                return self._validated_result(
+                    repaired,
+                    topic=topic,
+                    requested_id=requested_id,
+                    requested_title=requested_title,
+                    repairs=1,
+                )
+            except WizardV2Error as repaired_error:
+                raise WizardV2Error(
+                    f"AI draft invalid after one repair attempt: {repaired_error}"
+                ) from repaired_error
 
 
 def create_reviewed_wizard_v2(
