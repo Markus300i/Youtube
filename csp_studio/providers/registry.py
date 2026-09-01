@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from ..local_env import get_local_setting
 from .base import ProviderError
 from .nvidia_nim import NvidiaNimProvider
 
 
 def get_provider(name: str | None = None, **kwargs: Any):
-    selected = (name or os.getenv("CSP_AI_PROVIDER") or "nvidia_nim").strip().lower()
+    selected = (name or get_local_setting("CSP_AI_PROVIDER") or "nvidia_nim").strip().lower()
     aliases = {
         "nim": "nvidia_nim",
         "nvidia": "nvidia_nim",
