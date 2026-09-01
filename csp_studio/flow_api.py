@@ -12,6 +12,7 @@ from .log_safety import safe_exception_message
 from .new_short_wizard import NewShortWizard, WizardValidationError
 from .production_run import ProductionRunCoordinator
 from .providers import get_provider
+from .providers.nvidia_nim import nvidia_nim_status
 from .store import StudioStore
 from .visual_bible import VALID_KINDS, VisualBible, VisualBibleEntity
 from .wizard_v2 import WizardV2, WizardV2Error, create_reviewed_wizard_v2
@@ -63,6 +64,14 @@ def flow_js():
 @router.get("/flow-v2.js")
 def flow_v2_js():
     return FileResponse(WEB_DIR / "flow_v2.js", media_type="application/javascript")
+
+
+@router.get("/api/providers/nvidia-nim/status")
+def nvidia_nim_configuration_status():
+    try:
+        return nvidia_nim_status()
+    except Exception as exc:
+        raise HTTPException(500, safe_exception_message(exc)) from exc
 
 
 @router.get("/api/workers")
