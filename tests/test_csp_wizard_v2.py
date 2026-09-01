@@ -16,14 +16,27 @@ class FakeProvider:
 
     def __init__(self, payload: dict):
         self.payload = payload
+        self.calls = 0
 
     def chat(self, messages, *, model=None, temperature=0.2, max_tokens=2048):
+        self.calls += 1
         return ProviderResponse(
             provider="fake",
             model="fake-model",
             text=json.dumps(self.payload, ensure_ascii=False),
             usage={"total_tokens": 123},
         )
+
+
+class SequencedFakeProvider(FakeProvider):
+    def __init__(self, payloads: list[dict]):
+        super().__init__(payloads[-1])
+        self.payloads = payloads
+
+    def chat(self, messages, *, model=None, temperature=0.2, max_tokens=2048):
+        index = min(self.calls, len(self.payloads) - 1)
+        self.payload = self.payloads[index]
+        return super().chat(messages, model=model, temperature=temperature, max_tokens=max_tokens)
 
 
 class ResilientFakeProvider(FakeProvider):
@@ -115,7 +128,22 @@ class WizardV2Tests(unittest.TestCase):
         self.assertEqual(result["shot_audit"]["score"], 100)
         self.assertTrue(result["shot_audit"]["ok"])
         self.assertEqual(result["provider"]["name"], "fake")
+        self.assertEqual(result["provider"]["repairs"], 0)
         self.assertEqual(len(result["visual_bible"]["entities"]), 3)
+
+    def test_invalid_scene_count_is_repaired_once(self) -> None:
+        invalid = self._payload()
+        invalid["project"]["scenes"] = invalid["project"]["scenes"][:7]
+        provider = SequencedFakeProvider([invalid, self._payload()])
+
+        result = WizardV2(provider).draft(
+            "Strażnik odkrywa peron, którego nie ma w rozkładzie.",
+            project_id="wizard-v2-repair",
+        ).to_dict()
+
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(len(result["draft"]["scenes"]), 8)
+        self.assertEqual(result["provider"]["repairs"], 1)
 
     def test_provider_with_resilience_parameters_gets_wizard_timeout_and_retry(self) -> None:
         provider = ResilientFakeProvider(self._payload())
