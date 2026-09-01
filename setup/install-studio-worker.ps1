@@ -14,6 +14,7 @@ $Python = [System.IO.Path]::GetFullPath($Python)
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $Db = [System.IO.Path]::GetFullPath($Db)
 $WatchdogScript = Join-Path $Repo "setup\watch-studio-worker.ps1"
+$WatchdogLauncher = Join-Path $Repo "setup\watch-studio-worker-hidden.vbs"
 
 if (-not (Test-Path -LiteralPath $Repo -PathType Container)) {
     throw "Repo not found: $Repo"
@@ -23,6 +24,9 @@ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $WatchdogScript -PathType Leaf)) {
     throw "Watchdog script not found: $WatchdogScript"
+}
+if (-not (Test-Path -LiteralPath $WatchdogLauncher -PathType Leaf)) {
+    throw "Watchdog launcher not found: $WatchdogLauncher"
 }
 if (-not (Test-Path -LiteralPath $OutputRoot -PathType Container)) {
     New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
@@ -52,8 +56,8 @@ $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 
-$watchdogArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -TaskName `"$TaskName`" -Repo `"$Repo`" -Python `"$Python`" -OutputRoot `"$OutputRoot`" -Db `"$Db`""
-$watchdogAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $watchdogArguments -WorkingDirectory $Repo
+$watchdogArguments = "//B //NoLogo `"$WatchdogLauncher`" -TaskName `"$TaskName`" -Repo `"$Repo`" -Python `"$Python`" -OutputRoot `"$OutputRoot`" -Db `"$Db`""
+$watchdogAction = New-ScheduledTaskAction -Execute "wscript.exe" -Argument $watchdogArguments -WorkingDirectory $Repo
 $watchdogTrigger = New-ScheduledTaskTrigger `
     -Once `
     -At (Get-Date).AddMinutes(1) `
