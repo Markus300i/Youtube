@@ -8,6 +8,8 @@
     .wizard-ai-box { border:1px solid var(--line); border-radius:10px; padding:12px; display:grid; gap:9px; }
     .wizard-ai-box textarea { min-height:90px; }
     .wizard-ai-meta { font-size:11px; color:var(--muted); white-space:pre-wrap; }
+    .nim-ready { color:var(--good); }
+    .nim-missing { color:var(--bad); }
   `;
   document.head.appendChild(style);
 
@@ -50,6 +52,26 @@
     card.innerHTML = `<div class="eyebrow">STUDIO WORKER</div><div class="muted">Ładowanie heartbeat…</div>`;
     grid.prepend(card);
     refreshWorkerCard().catch(() => {});
+  }
+
+  async function refreshNimStatus() {
+    const target = document.getElementById("wizardNimStatus");
+    if (!target) return null;
+    try {
+      const status = await api("/api/providers/nvidia-nim/status");
+      if (status.configured) {
+        target.className = "wizard-ai-meta nim-ready";
+        target.textContent = `NVIDIA NIM gotowy · ${status.chat_model} · źródło klucza: ${status.api_key_source}`;
+      } else {
+        target.className = "wizard-ai-meta nim-missing";
+        target.textContent = "NVIDIA NIM: brak klucza. Uruchom setup\\configure-nim.ps1; klucz nie jest zapisywany w SQLite ani logach.";
+      }
+      return status;
+    } catch (err) {
+      target.className = "wizard-ai-meta nim-missing";
+      target.textContent = `NVIDIA NIM status: ${err.message}`;
+      return null;
+    }
   }
 
   function currentWizardDraft() {
@@ -96,6 +118,11 @@
     const topic = document.getElementById("wizardAiTopic").value.trim();
     if (!topic) {
       alert("Wizard V2: wpisz pomysł na Shorta.");
+      return;
+    }
+    const nimStatus = await refreshNimStatus();
+    if (!nimStatus?.configured) {
+      alert("Wizard V2: NVIDIA NIM nie jest skonfigurowany. Uruchom setup\\configure-nim.ps1 i spróbuj ponownie.");
       return;
     }
     const button = document.getElementById("generateAiDraftBtn");
@@ -158,6 +185,7 @@
     box.className = "wizard-ai-box";
     box.innerHTML = `
       <div><div class="eyebrow">WIZARD V2 · AI DRAFT</div><strong>Pomysł → scenariusz → 8 scen → Visual Bible</strong></div>
+      <div id="wizardNimStatus" class="wizard-ai-meta">Sprawdzam NVIDIA NIM…</div>
       <textarea id="wizardAiTopic" placeholder="Np. nocny strażnik na małej stacji zauważa peron, którego nie ma w żadnym rozkładzie…"></textarea>
       <div class="flow-actions">
         <button id="generateAiDraftBtn" class="ghost">Generuj draft AI</button>
@@ -168,6 +196,7 @@
     body.prepend(box);
     box.querySelector("#generateAiDraftBtn").addEventListener("click", generateAiDraft);
     box.querySelector("#createAiShortBtn").addEventListener("click", createAiShort);
+    refreshNimStatus().catch(() => {});
   }
 
   function inject() {
