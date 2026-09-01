@@ -26,6 +26,31 @@ class FakeProvider:
         )
 
 
+class ResilientFakeProvider(FakeProvider):
+    def __init__(self, payload: dict):
+        super().__init__(payload)
+        self.request_timeout = None
+        self.retries = None
+        self.temperature = None
+        self.max_tokens = None
+
+    def chat(
+        self,
+        messages,
+        *,
+        model=None,
+        temperature=0.2,
+        max_tokens=2048,
+        request_timeout=None,
+        retries=0,
+    ):
+        self.request_timeout = request_timeout
+        self.retries = retries
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        return super().chat(messages, model=model, temperature=temperature, max_tokens=max_tokens)
+
+
 class WizardV2Tests(unittest.TestCase):
     def _payload(self) -> dict:
         narration = " ".join(f"słowo{i}" for i in range(1, 81))
@@ -91,6 +116,14 @@ class WizardV2Tests(unittest.TestCase):
         self.assertTrue(result["shot_audit"]["ok"])
         self.assertEqual(result["provider"]["name"], "fake")
         self.assertEqual(len(result["visual_bible"]["entities"]), 3)
+
+    def test_provider_with_resilience_parameters_gets_wizard_timeout_and_retry(self) -> None:
+        provider = ResilientFakeProvider(self._payload())
+        WizardV2(provider).draft("Fikcyjny test timeoutu Wizarda V2.")
+        self.assertEqual(provider.request_timeout, 180.0)
+        self.assertEqual(provider.retries, 1)
+        self.assertEqual(provider.temperature, 0.35)
+        self.assertEqual(provider.max_tokens, 3800)
 
     def test_reviewed_create_persists_project_and_visual_bible(self) -> None:
         draft = WizardV2(FakeProvider(self._payload())).draft(
