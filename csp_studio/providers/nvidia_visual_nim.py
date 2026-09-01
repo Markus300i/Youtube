@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 import httpx
 
+from ..local_env import get_local_setting
 from .base import ProviderError
 from .media import MediaResult
 
@@ -35,15 +36,15 @@ class NvidiaVisualNimProvider:
         timeout: float = 300.0,
         client: httpx.Client | None = None,
     ) -> None:
-        configured = base_url or os.getenv("NVIDIA_VISUAL_NIM_BASE_URL")
+        configured = base_url or get_local_setting("NVIDIA_VISUAL_NIM_BASE_URL")
         if not configured:
             raise ProviderError(
                 "NVIDIA_VISUAL_NIM_BASE_URL is not configured; media experiments are disabled by default"
             )
         self.base_url = configured.rstrip("/")
-        self.api_key = api_key if api_key is not None else os.getenv("NVIDIA_API_KEY")
-        self.image_model = image_model or os.getenv("CSP_NIM_IMAGE_MODEL") or DEFAULT_IMAGE_MODEL
-        self.video_model = video_model or os.getenv("CSP_NIM_VIDEO_MODEL") or DEFAULT_VIDEO_MODEL
+        self.api_key = api_key if api_key is not None else get_local_setting("NVIDIA_API_KEY")
+        self.image_model = image_model or get_local_setting("CSP_NIM_IMAGE_MODEL") or DEFAULT_IMAGE_MODEL
+        self.video_model = video_model or get_local_setting("CSP_NIM_VIDEO_MODEL") or DEFAULT_VIDEO_MODEL
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
 
