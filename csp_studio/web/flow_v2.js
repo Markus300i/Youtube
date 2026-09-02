@@ -8,6 +8,12 @@
     .wizard-ai-box { border:1px solid var(--line); border-radius:10px; padding:12px; display:grid; gap:9px; }
     .wizard-ai-box textarea { min-height:90px; }
     .wizard-ai-meta { font-size:11px; color:var(--muted); white-space:pre-wrap; }
+    .wizard-ai-state { border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-size:12px; line-height:1.45; }
+    .wizard-ai-state.idle { color:var(--muted); }
+    .wizard-ai-state.busy { color:var(--warn); border-color:#6e5a2b; }
+    .wizard-ai-state.ready { color:var(--good); border-color:#2f6b4e; }
+    .wizard-ai-state.warn { color:var(--warn); border-color:#6e5a2b; }
+    .wizard-ai-state.error { color:var(--bad); border-color:#744545; }
     .nim-ready { color:var(--good); }
     .nim-missing { color:var(--bad); }
   `;
@@ -16,6 +22,19 @@
   let aiEnvelope = null;
   let workerBusy = false;
   let injectScheduled = false;
+
+  function setWizardAiState(kind, message) {
+    const target = document.getElementById("wizardAiState");
+    if (!target) return;
+    target.className = `wizard-ai-state ${kind}`;
+    target.textContent = message;
+  }
+
+  function clearAiEnvelope(message = null) {
+    aiEnvelope = null;
+    document.getElementById("createAiShortBtn")?.setAttribute("disabled", "disabled");
+    if (message) setWizardAiState("warn", message);
+  }
 
   async function refreshWorkerCard() {
     const card = document.getElementById("workerStatusCard");
@@ -109,54 +128,87 @@
     const meta = document.getElementById("wizardAiMeta");
     if (meta) {
       const entities = envelope.visual_bible?.entities?.length || 0;
-      meta.textContent = `Shot QA ${envelope.shot_audit?.score ?? "—"}/100 · Visual Bible ${entities} encji · ${envelope.provider?.name || "provider"}/${envelope.provider?.model || "model"}`;
+      const storyRepairs = envelope.provider?.story_repairs ?? 0;
+      const visualRepairs = envelope.provider?.visual_repairs ?? 0;
+      meta.textContent = `Shot QA ${envelope.shot_audit?.score ?? "—"}/100 · Visual Bible ${entities} encji · repairs story/visual ${storyRepairs}/${visualRepairs} · ${envelope.provider?.name || "provider"}/${envelope.provider?.model || "model"}`;
     }
+    setWizardAiState("ready", "Draft AI przeszedł deterministic gates. Sprawdź narrację, 8 scen i prompty; projekt zostanie zapisany dopiero po kliknięciu „Utwórz po review”.");
     document.getElementById("createAiShortBtn")?.removeAttribute("disabled");
+  }
+
+  async function requestAiDraft(payload) {
+    const response = await fetch("/api/wizard/v2/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      let detail = `${response.status} ${response.statusText}`;
+      try {
+        const data = await response.json();
+        detail = data.detail || detail;
+      } catch (_) {}
+      const error = new Error(detail);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
   }
 
   async function generateAiDraft() {
     const topic = document.getElementById("wizardAiTopic").value.trim();
     if (!topic) {
-      alert("Wizard V2: wpisz pomysł na Shorta.");
+      setWizardAiState("warn", "Wpisz pomysł na Shorta albo skorzystaj z ręcznego formularza poniżej.");
       return;
     }
     const nimStatus = await refreshNimStatus();
     if (!nimStatus?.configured) {
-      alert("Wizard V2: NVIDIA NIM nie jest skonfigurowany. Uruchom setup\\configure-nim.ps1 i spróbuj ponownie.");
+      setWizardAiState("error", "NVIDIA NIM nie jest skonfigurowany. Możesz skonfigurować provider albo od razu utworzyć projekt ręcznie poniżej.");
       return;
     }
+
+    clearAiEnvelope();
     const button = document.getElementById("generateAiDraftBtn");
     button.disabled = true;
     const oldText = button.textContent;
     button.textContent = "Generuję…";
+    setWizardAiState("busy", "Generuję draft. Nic nie jest jeszcze zapisywane do SQLite ani YAML.");
     try {
-      aiEnvelope = await api("/api/wizard/v2/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic,
-          project_id: document.getElementById("wizardId").value.trim() || null,
-          title: document.getElementById("wizardTitle").value.trim() || null,
-        }),
+      aiEnvelope = await requestAiDraft({
+        topic,
+        project_id: document.getElementById("wizardId").value.trim() || null,
+        title: document.getElementById("wizardTitle").value.trim() || null,
       });
       populateWizard(aiEnvelope);
+      button.textContent = "Generuj ponownie";
       toast("Wizard V2: draft AI gotowy do review");
     } catch (err) {
-      alert(`Wizard V2 draft: ${err.message}`);
+      clearAiEnvelope();
+      if (err.status === 422) {
+        setWizardAiState("warn", `Model nie przeszedł deterministic gate: ${err.message}. Nic nie zapisano. Spróbuj ponownie albo dokończ formularz ręcznie.`);
+        toast("Wizard V2: draft odrzucony przez gate — możesz ponowić");
+      } else {
+        setWizardAiState("error", `Nie udało się pobrać draftu AI: ${err.message}. Ręczny Wizard pozostaje dostępny poniżej.`);
+      }
+      button.textContent = "Spróbuj ponownie";
     } finally {
       button.disabled = false;
-      button.textContent = oldText;
+      if (button.textContent === "Generuję…") button.textContent = oldText;
     }
   }
 
   async function createAiShort() {
-    if (!aiEnvelope) return;
+    if (!aiEnvelope) {
+      setWizardAiState("warn", "Brak aktualnego, zaakceptowanego envelope AI. Wygeneruj draft ponownie albo użyj ręcznego przycisku „Utwórz projekt”.");
+      return;
+    }
     const reviewed = {
       ...aiEnvelope,
       draft: currentWizardDraft(),
     };
     const button = document.getElementById("createAiShortBtn");
     button.disabled = true;
+    setWizardAiState("busy", "Waliduję reviewed draft i zapisuję projekt. Production Run nie zostanie uruchomiony automatycznie.");
     try {
       const result = await api("/api/wizard/v2/create", {
         method: "POST",
@@ -169,12 +221,19 @@
       await loadProjects();
       projectSelect.value = state.projectId;
       await loadProjectData({ keepSelection: false });
-      aiEnvelope = null;
+      clearAiEnvelope();
     } catch (err) {
-      alert(`Wizard V2 create: ${err.message}`);
-    } finally {
+      setWizardAiState("error", `Reviewed create został odrzucony: ${err.message}. Projekt nie powinien być uruchamiany dalej, dopóki błąd nie zostanie poprawiony.`);
       button.disabled = false;
     }
+  }
+
+  function useManualWizard() {
+    clearAiEnvelope();
+    setWizardAiState("idle", "Tryb ręczny: uzupełnij pola i 8 scen poniżej, a następnie użyj przycisku „Utwórz projekt”. AI i Visual Bible nie są wymagane do utworzenia ręcznego draftu.");
+    const target = document.querySelector("#newShortDialog .wizard-grid");
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("wizardId")?.focus();
   }
 
   function enhanceWizard() {
@@ -189,13 +248,21 @@
       <textarea id="wizardAiTopic" placeholder="Np. nocny strażnik na małej stacji zauważa peron, którego nie ma w żadnym rozkładzie…"></textarea>
       <div class="flow-actions">
         <button id="generateAiDraftBtn" class="ghost">Generuj draft AI</button>
-        <button id="createAiShortBtn" class="primary" disabled>Utwórz z Visual Bible</button>
+        <button id="createAiShortBtn" class="primary" disabled>Utwórz po review</button>
+        <button id="manualWizardBtn" class="ghost">Przejdź do ręcznego formularza</button>
       </div>
+      <div id="wizardAiState" class="wizard-ai-state idle">AI jest opcjonalne. Nieudany draft nie zapisuje projektu i nie blokuje ręcznego workflow.</div>
       <div id="wizardAiMeta" class="wizard-ai-meta">Draft AI nie zapisuje niczego do SQLite. Najpierw zostanie wypełniony formularz do review.</div>
     `;
     body.prepend(box);
     box.querySelector("#generateAiDraftBtn").addEventListener("click", generateAiDraft);
     box.querySelector("#createAiShortBtn").addEventListener("click", createAiShort);
+    box.querySelector("#manualWizardBtn").addEventListener("click", useManualWizard);
+    box.querySelector("#wizardAiTopic").addEventListener("input", () => {
+      if (aiEnvelope) {
+        clearAiEnvelope("Pomysł został zmieniony po wygenerowaniu draftu. Wygeneruj AI ponownie albo przejdź do ręcznego formularza; poprzedni envelope został unieważniony.");
+      }
+    });
     refreshNimStatus().catch(() => {});
   }
 
