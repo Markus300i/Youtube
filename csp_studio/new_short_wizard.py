@@ -21,7 +21,6 @@ class WizardValidationError(ValueError):
 def validate_wizard_payload(payload: dict[str, Any]) -> None:
     project_id = str(payload.get("id") or "").strip()
     title = str(payload.get("title") or "").strip()
-    narration = str(payload.get("narration") or "").strip()
     scenes = payload.get("scenes")
 
     if not PROJECT_ID_RE.fullmatch(project_id):
@@ -46,20 +45,16 @@ def validate_wizard_payload(payload: dict[str, Any]) -> None:
             raise WizardValidationError(f"scene {scene_id}: text is required")
         if not prompt:
             raise WizardValidationError(f"scene {scene_id}: prompt is required")
+        raw["text"] = text
         combined_text.append(text)
     if ids != list(range(1, 9)):
         raise WizardValidationError("scene ids must be exactly 1..8 in order")
 
-    if not narration:
-        narration = " ".join(combined_text)
-        payload["narration"] = narration
-    words = narration.split()
+    canonical_narration = " ".join(combined_text).strip()
+    payload["narration"] = canonical_narration
+    words = canonical_narration.split()
     if len(words) < 70 or len(words) > 160:
         raise WizardValidationError(f"narration must contain 70-160 words, got {len(words)}")
-
-    scene_words = " ".join(combined_text).split()
-    if not scene_words:
-        raise WizardValidationError("scene narration is empty")
 
 
 def normalize_wizard_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,6 +12,28 @@ from csp_studio.flow_api import router
 
 
 class FlowApiTests(unittest.TestCase):
+    def test_wizard_v2_draft_requests_structured_json_provider(self) -> None:
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+        provider = Mock()
+        draft_result = Mock()
+        draft_result.to_dict.return_value = {"draft": {"id": "wizard-v2-structured"}}
+
+        with patch("csp_studio.flow_api.get_provider", return_value=provider) as provider_factory, patch(
+            "csp_studio.flow_api.WizardV2"
+        ) as wizard:
+            wizard.return_value.draft.return_value = draft_result
+            response = client.post(
+                "/api/wizard/v2/draft",
+                json={"project_id": "wizard-v2-structured", "topic": "Fikcyjny test structured JSON."},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        provider_factory.assert_called_once_with(None, structured_json=True)
+        wizard.assert_called_once_with(provider)
+        provider.close.assert_called_once_with()
+
     def test_flow_scripts_are_not_browser_cached(self) -> None:
         app = FastAPI()
         app.include_router(router)
@@ -37,7 +59,7 @@ class FlowApiTests(unittest.TestCase):
             scenes = [
                 {
                     "id": i,
-                    "text": f"Scena {i} opis narracji",
+                    "text": " ".join(f"scena{i}_slowo{word}" for word in range(1, 11)),
                     "prompt": f"Prompt sceny {i}",
                     "motion": "static",
                     "continuity_refs": [],

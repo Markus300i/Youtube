@@ -139,7 +139,7 @@ def create_project_from_wizard(payload: dict[str, Any]):
 def draft_project_v2(payload: WizardV2DraftInput):
     provider = None
     try:
-        provider = get_provider(payload.provider)
+        provider = get_provider(payload.provider, structured_json=True)
         return WizardV2(provider).draft(
             payload.topic,
             project_id=payload.project_id,

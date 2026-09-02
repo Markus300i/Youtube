@@ -104,6 +104,7 @@ class NvidiaNimProvider:
         timeout: float | None = None,
         vision_timeout: float | None = None,
         vision_retries: int | None = None,
+        structured_json: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
         self.api_key = _clean_api_key(api_key if api_key is not None else get_local_setting("NVIDIA_API_KEY"))
@@ -120,6 +121,7 @@ class NvidiaNimProvider:
         self.vision_retries = int(
             vision_retries if vision_retries is not None else _setting_int("CSP_NIM_VISION_RETRIES", DEFAULT_VISION_RETRIES)
         )
+        self.structured_json = bool(structured_json)
         if self.timeout <= 0 or self.vision_timeout <= 0:
             raise ProviderError("NIM timeouts must be greater than zero")
         if self.vision_retries < 0:
@@ -202,6 +204,9 @@ class NvidiaNimProvider:
             "max_tokens": int(max_tokens),
             "stream": False,
         }
+        if self.structured_json:
+            payload["response_format"] = {"type": "json_object"}
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         data = self._post(
             "chat/completions",
             payload,
