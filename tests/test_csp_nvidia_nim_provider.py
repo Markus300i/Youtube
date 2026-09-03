@@ -13,6 +13,54 @@ from csp_studio.providers import NvidiaNimProvider, ProviderError, get_provider
 
 
 class NvidiaNimProviderTests(unittest.TestCase):
+    def test_structured_json_chat_adds_nim_payload_fields(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={"model": "mock", "choices": [{"message": {"content": "{}"}}]},
+            )
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        provider = NvidiaNimProvider(
+            api_key="key",
+            base_url="https://nim.test/v1",
+            structured_json=True,
+            client=client,
+        )
+        provider.chat([{"role": "user", "content": "Return JSON"}], model="mock")
+
+        self.assertTrue(provider.structured_json)
+        self.assertEqual(seen["response_format"], {"type": "json_object"})
+        self.assertEqual(seen["chat_template_kwargs"], {"enable_thinking": False})
+        client.close()
+
+    def test_unstructured_chat_omits_nim_structured_payload_fields(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={"model": "mock", "choices": [{"message": {"content": "ok"}}]},
+            )
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        provider = NvidiaNimProvider(
+            api_key="key",
+            base_url="https://nim.test/v1",
+            structured_json=False,
+            client=client,
+        )
+        provider.chat([{"role": "user", "content": "Regular chat"}], model="mock")
+
+        self.assertFalse(provider.structured_json)
+        self.assertNotIn("response_format", seen)
+        self.assertNotIn("chat_template_kwargs", seen)
+        client.close()
+
     def test_chat_uses_openai_compatible_endpoint_and_bearer_key(self) -> None:
         seen = {}
 
@@ -217,6 +265,7 @@ class NvidiaNimProviderTests(unittest.TestCase):
         provider = get_provider("nim", api_key="key")
         try:
             self.assertIsInstance(provider, NvidiaNimProvider)
+            self.assertFalse(provider.structured_json)
         finally:
             provider.close()
 

@@ -1,73 +1,144 @@
-# CSP Automation v1 — pierwszy lokalny run
+# CSP Studio — lokalne uruchomienie na Windows
 
-Ta lista dotyczy pierwszego uruchomienia na komputerze produkcyjnym RTX 4060 Ti 8 GB.
+Ta instrukcja dotyczy aktualnej aplikacji **CSP Studio** na komputerze produkcyjnym z RTX 4060 Ti 8 GB.
 
-## A. Jednorazowo
+Canonical lokalne ścieżki:
+
+```text
+Repo:        C:\CSP\Youtube
+Python:      C:\CSP\venv\Scripts\python.exe
+Output:      C:\CSP\output
+SQLite:      C:\CSP\output\csp-studio.db
+Studio URL:  http://127.0.0.1:8765/
+ComfyUI:     http://127.0.0.1:8188/
+```
+
+## A. Jednorazowa instalacja
 
 - [ ] Zainstaluj Git.
 - [ ] Zainstaluj Python 3.11.
 - [ ] Zainstaluj pełny FFmpeg z NVENC i libass.
 - [ ] Zainstaluj ComfyUI.
-- [ ] Sklonuj `Markus300i/Youtube` i przełącz się na `csp-automation-v1`.
-- [ ] Uruchom `setup/windows-bootstrap.ps1 -ComfyUIPath "C:\ComfyUI" -InstallModels`.
-- [ ] Opcjonalnie dodaj `C:\CSP\voice\narrator_reference.wav`.
-- [ ] Uruchom ComfyUI na `127.0.0.1:8188`.
-- [ ] Uruchom `C:\CSP\venv\Scripts\python.exe scripts\preflight.py` i uzyskaj `PREFLIGHT OK`.
-- [ ] Dodaj GitHub self-hosted runner z etykietą `csp`.
+- [ ] Sklonuj `Markus300i/Youtube` do `C:\CSP\Youtube`.
+- [ ] Utwórz / przygotuj środowisko `C:\CSP\venv` zgodnie z wymaganiami projektu.
+- [ ] Zainstaluj Z-Image / FLUX.2 Klein zgodnie z odpowiednimi skryptami w `setup\`.
+- [ ] Opcjonalnie dodaj `C:\CSP\voice\narrator_reference.wav` dla Chatterbox.
+- [ ] Skonfiguruj NVIDIA NIM przez `setup\configure-nim.ps1` — nie wpisuj klucza do repo ani SQLite.
+- [ ] Zainstaluj trwałego Studio Workera przez `setup\install-studio-worker.ps1`.
+- [ ] Uruchom preflight i usuń błędy środowiska przed produkcją.
 
-## B. Smoke test bez GitHub Actions
+## B. Normalne uruchomienie CSP Studio
 
-Te polecenia można wykonać ręcznie w PowerShell, aby łatwo wskazać ewentualny etap awarii:
+W PowerShell:
 
 ```powershell
-$py = 'C:\CSP\venv\Scripts\python.exe'
-$short = 'shorts\001-drzwi-0.yaml'
-$env:CSP_OUTPUT_DIR = 'C:\CSP\output'
-$env:CSP_COMFY_URL = 'http://127.0.0.1:8188'
-$env:CSP_VOICE_REFERENCE = 'C:\CSP\voice\narrator_reference.wav'
-
-& $py scripts\validate_short.py $short
-& $py scripts\generate_images.py $short
-& $py scripts\generate_tts.py $short
-& $py scripts\transcribe.py $short
-& $py scripts\sound_design.py $short
-& $py scripts\render.py $short
+cd C:\CSP\Youtube
+.\setup\start-csp-studio.ps1
 ```
 
-Oczekiwany wynik:
+Launcher:
 
-```text
-C:\CSP\output\001-drzwi-0\final.mp4
+- używa `C:\CSP\venv\Scripts\python.exe`,
+- używa produkcyjnego `C:\CSP\output\csp-studio.db`,
+- nie uruchamia drugiej kopii Studio, jeśli poprawna instancja już działa,
+- nie uruchamia drugiego Workera dla tej samej bazy,
+- uruchamia zainstalowany Worker + watchdog, jeśli są dostępne,
+- w razie braku instalacji Workera może uruchomić bezpośredni worker z ostrzeżeniem,
+- czeka na `/api/health`,
+- otwiera `http://127.0.0.1:8765/`.
+
+Bez automatycznego otwierania przeglądarki:
+
+```powershell
+.\setup\start-csp-studio.ps1 -NoBrowser
 ```
 
-## C. Diagnostyka 8 GB VRAM
+Uruchomienie samego GUI/API bez Workera:
 
-Pipeline generuje tylko jedną scenę naraz i po scenach zwalnia modele ComfyUI.
+```powershell
+.\setup\start-csp-studio.ps1 -SkipWorker
+```
 
-Jeżeli mimo quantyzacji pojawi się CUDA OOM:
+Ta opcja jest przeznaczona do diagnostyki. Normalna produkcja powinna mieć Workera online.
+
+## C. Zatrzymanie
+
+Studio + Worker:
+
+```powershell
+.\setup\stop-csp-studio.ps1
+```
+
+Tylko Studio, Worker pozostaje aktywny:
+
+```powershell
+.\setup\stop-csp-studio.ps1 -KeepWorker
+```
+
+Zatrzymanie CSP Studio nie zatrzymuje ComfyUI.
+
+## D. Szybki health check
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/api/health
+Invoke-RestMethod http://127.0.0.1:8765/api/workers
+Invoke-RestMethod http://127.0.0.1:8765/api/providers/nvidia-nim/status
+```
+
+Nie drukuj ani nie zapisuj `NVIDIA_API_KEY` podczas diagnostyki.
+
+## E. Normalny workflow użytkownika
+
+1. Otwórz CSP Studio.
+2. Kliknij **+ Nowy Short**.
+3. Spróbuj wygenerować draft przez Wizard V2 albo użyj ręcznego formularza.
+4. Draft AI nie zapisuje projektu przed review.
+5. Sprawdź narrację, 8 scen, prompty i Visual Bible.
+6. Utwórz projekt.
+7. Agent One pokaże deterministyczny następny krok.
+8. Production Run / Task Engine wykonują dozwolone etapy przez Studio Workera.
+9. Sceny wymagają ludzkiego review — program nie zatwierdza ich automatycznie.
+10. OpenCut pozostaje warstwą timeline/editingu; CSP Studio nie buduje drugiego NLE.
+
+Nieudany draft AI nie blokuje programu: można ponowić generację albo przejść do ręcznego Wizarda.
+
+## F. Diagnostyka 8 GB VRAM
+
+Pipeline wykonuje lokalne zadania GPU sekwencyjnie. Quick Regenerate używa szybszej ścieżki Z-Image, a Quality Regenerate może wykorzystywać bardziej kosztowną ścieżkę i referencje scen.
+
+Jeżeli pojawi się CUDA OOM:
 
 1. zamknij inne aplikacje wykorzystujące GPU,
-2. uruchom ponownie ComfyUI,
-3. zmniejsz roboczą rozdzielczość `z-image-turbo` w `config/models.yaml` z `768x1344` do `704x1248`,
-4. powtórz tylko `generate_images.py` — istniejące sceny zostaną pominięte.
+2. sprawdź, czy nie działa drugi lokalny task GPU,
+3. uruchom ponownie ComfyUI,
+4. w razie potrzeby zmniejsz roboczą rozdzielczość modelu w `config/models.yaml`,
+5. ponów tylko nieudane zadanie w Tasks.
 
-Nie obniżaj finalnego `1080x1920`; jest ono niezależne od rozdzielczości generowania.
+Nie obniżaj finalnego `1080x1920` tylko z powodu roboczej rozdzielczości generatora.
 
-## D. Co zachować po teście
+## G. Gdzie szukać stanu i logów
 
-Do oceny jakości zachowaj:
+```text
+C:\CSP\output\csp-studio.db
+C:\CSP\output\.studio-tasks\
+C:\CSP\output\.studio-snapshots\
+C:\CSP\output\.studio-service\
+```
 
-- `scene-01.png` … `scene-08.png`,
-- `voice.wav`,
-- `tts-timings.json`,
-- `subtitles.ass`,
-- `final_mix.wav`,
-- `final.mp4`.
+GUI Tasks pokazuje bezpiecznie ograniczone i redagowane logi zadań. Surowych sekretów nie należy kopiować do raportów ani commitów.
 
-Na podstawie pierwszego renderu kalibrujemy potem:
+## H. Oczekiwane artefakty produkcji
 
-- parametry Chatterbox (`cfg_weight`, `exaggeration`),
-- wysokość i rozmiar napisów,
-- szybkość push/pan,
-- poziom ambience i impactu,
-- roboczą rozdzielczość Z-Image.
+Dla gotowego Shorta typowo:
+
+```text
+images\scene-01.png ... scene-08.png
+audio\voice.wav
+audio\tts-timings.json
+subtitles.ass i/lub subtitles.srt
+audio\final_mix.wav
+opencut / interchange artifact
+final.mp4
+```
+
+Agent One oraz pipeline freshness określają, czy artefakt jest aktualny. Samo istnienie starego pliku nie oznacza, że etap jest gotowy po zmianie sceny, obrazu lub audio.

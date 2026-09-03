@@ -25,7 +25,7 @@ $py = "C:\CSP\venv\Scripts\python.exe"
 ## Uruchomienie
 
 ```powershell
-cd C:\Users\pat30\Youtube
+cd C:\CSP\Youtube
 $py = "C:\CSP\venv\Scripts\python.exe"
 $env:CSP_OUTPUT_DIR = "C:\CSP\output"
 & $py -m csp_studio.web_app

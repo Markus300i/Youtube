@@ -54,6 +54,29 @@ The contract contains:
 
 The current OpenCut rewrite announces Editor API, headless mode, MCP and plugin architecture but these interfaces are not yet treated as stable by CSP. The Classic model was used only to validate the conceptual mapping `TProject -> TScene -> SceneTracks -> ImageElement/AudioElement/TextTrack`.
 
+### Supported API review (2026-08-30)
+
+The official OpenCut sources still do not expose a supported project-import,
+Editor API, MCP, or headless contract that CSP can target:
+
+- the official README describes Editor API, MCP, headless mode, and scripting as
+  features of an in-progress rewrite, not released integration surfaces:
+  <https://github.com/OpenCut-app/OpenCut/blob/main/README.md>
+- the official rewrite tracker still lists the engine core, Editor API, project
+  storage, headless mode, and MCP server as unfinished work:
+  <https://github.com/OpenCut-app/OpenCut/issues/811>
+- portable JSON/project import remains an open feature request, and the two
+  implementation attempts are open pull requests rather than a supported format:
+  <https://github.com/OpenCut-app/OpenCut/issues/719>,
+  <https://github.com/OpenCut-app/OpenCut/pull/764>, and
+  <https://github.com/OpenCut-app/OpenCut/pull/766>.
+
+Decision: keep `csp-opencut-interchange/1` as a CSP-owned, editor-neutral contract.
+Do not rename it to `.opencut`, write OpenCut IndexedDB/OPFS state, or copy an open
+PR's serialization. Add a materializer only after OpenCut publishes a versioned,
+supported API/schema; implement that materializer behind the existing adapter
+boundary so canonical CSP state and task checkpoints do not change.
+
 ### Local command
 
 ```powershell

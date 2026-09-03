@@ -49,6 +49,62 @@ class TaskEngineTests(unittest.TestCase):
                 self.assertEqual(complete.progress, 100)
                 self.assertEqual(complete.result["path"], "preview.mp4")
 
+    def test_targeted_claim_runs_requested_task_not_oldest_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(self._project())
+                engine = TaskEngine(store)
+                first = engine.submit("001", "captions", resource="cpu")
+                second = engine.submit("001", "sound_design", resource="cpu")
+                claimed = engine.claim(second.task_id, "studio-web")
+                self.assertIsNotNone(claimed)
+                self.assertEqual(claimed.task_id, second.task_id)
+                self.assertEqual(claimed.state, "running")
+                self.assertEqual(engine.get(first.task_id).state, "queued")
+
+    def test_failure_sanitizes_and_bounds_persisted_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(self._project())
+                engine = TaskEngine(store)
+                task = engine.submit("001", "tts", resource="gpu")
+                failed = engine.fail(
+                    task.task_id,
+                    "NVIDIA_API_KEY=database-secret " + ("x" * 5000),
+                )
+
+                self.assertNotIn("database-secret", failed.error or "")
+                self.assertIn("[REDACTED]", failed.error or "")
+                self.assertLessEqual(len(failed.error or ""), 4000)
+
+    def test_existing_legacy_log_tail_is_removed_from_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "studio.db"
+            with StudioStore(db) as store:
+                store.upsert_project(self._project())
+                engine = TaskEngine(store)
+                task = engine.submit("001", "tts", resource="gpu")
+                store.conn.execute(
+                    "UPDATE studio_tasks SET state='failed', error=? WHERE task_id=?",
+                    (
+                        "RuntimeError: generation failed | log: NVIDIA_API_KEY=legacy-secret",
+                        task.task_id,
+                    ),
+                )
+                store.conn.commit()
+
+                migrated = TaskEngine(store).get(task.task_id)
+                stored = store.conn.execute(
+                    "SELECT error FROM studio_tasks WHERE task_id=?",
+                    (task.task_id,),
+                ).fetchone()["error"]
+
+                self.assertEqual(migrated.error, "RuntimeError: generation failed")
+                self.assertEqual(stored, "RuntimeError: generation failed")
+                self.assertNotIn("legacy-secret", stored)
+
     def test_only_one_gpu_task_can_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "studio.db"

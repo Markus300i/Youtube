@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .log_safety import sanitize_persisted_task_error
 from .models import utc_now
 from .store import StudioStore
 
@@ -86,15 +87,31 @@ class StudioTask:
 class TaskEngine:
     """Persistent Studio task state and queue.
 
-    This intentionally does not spawn background threads yet. It provides the durable
-    contract that GUI workers, Agent One and future OpenCut/render workers can share.
-    GPU claims are serialized to one running task at a time for the 8 GB CSP machine.
+    Studio workers share this durable contract. GPU claims are serialized to one
+    running task at a time for the 8 GB CSP machine.
     """
 
     def __init__(self, store: StudioStore):
         self.store = store
         self.store.conn.executescript(TASK_SCHEMA)
         self.store.conn.commit()
+        self._sanitize_existing_errors()
+
+    def _sanitize_existing_errors(self) -> None:
+        rows = self.store.conn.execute(
+            "SELECT task_id,error FROM studio_tasks WHERE error IS NOT NULL"
+        ).fetchall()
+        updates = []
+        for row in rows:
+            safe_error = sanitize_persisted_task_error(str(row["error"]))
+            if safe_error != row["error"]:
+                updates.append((safe_error, row["task_id"]))
+        if updates:
+            self.store.conn.executemany(
+                "UPDATE studio_tasks SET error=? WHERE task_id=?",
+                updates,
+            )
+            self.store.conn.commit()
 
     def submit(
         self,
@@ -156,6 +173,49 @@ class TaskEngine:
             tuple(params),
         ).fetchall()
         return [self._row_to_task(row) for row in rows]
+
+    def claim(self, task_id: str, worker_id: str) -> StudioTask | None:
+        """Claim one known queued task transactionally.
+
+        This is used by GUI-triggered workers so clicking Run executes exactly the
+        requested task instead of an unrelated older queue item.
+        """
+        conn = self.store.conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT task_id,resource,state FROM studio_tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                raise KeyError(f"Unknown task: {task_id}")
+            if row["state"] != "queued":
+                conn.rollback()
+                return None
+            if row["resource"] == "gpu":
+                running_gpu = conn.execute(
+                    "SELECT 1 FROM studio_tasks WHERE state='running' AND resource='gpu' AND task_id!=? LIMIT 1",
+                    (task_id,),
+                ).fetchone()
+                if running_gpu:
+                    conn.rollback()
+                    return None
+            now = utc_now()
+            conn.execute(
+                """
+                UPDATE studio_tasks
+                SET state='running', worker_id=?, started_at=?, finished_at=NULL,
+                    progress=0, failed_stage=NULL, error=NULL, updated_at=?
+                WHERE task_id=? AND state='queued'
+                """,
+                (worker_id, now, now, task_id),
+            )
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
 
     def claim_next(self, worker_id: str, *, resource: str | None = None) -> StudioTask | None:
         if resource is not None and resource not in VALID_RESOURCES:
@@ -251,6 +311,7 @@ class TaskEngine:
         task = self._require(task_id)
         if task.state not in {"running", "queued"}:
             raise RuntimeError(f"Task {task_id} cannot fail from state {task.state}")
+        error = sanitize_persisted_task_error(str(error))
         now = utc_now()
         self.store.conn.execute(
             """
@@ -380,49 +441,47 @@ class TaskEngine:
 def atomic_write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temp.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, target)
-    finally:
-        temp.unlink(missing_ok=True)
+    temp = target.with_suffix(target.suffix + f".{uuid.uuid4().hex}.tmp")
+    with temp.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, target)
     return target
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CSP Studio persistent task engine")
-    parser.add_argument("--db", default=os.getenv("CSP_STUDIO_DB"))
+    parser.add_argument("--db", required=True)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    list_cmd = sub.add_parser("list")
-    list_cmd.add_argument("--project")
-    list_cmd.add_argument("--state", choices=sorted(VALID_STATES))
+    submit = sub.add_parser("submit")
+    submit.add_argument("project_id")
+    submit.add_argument("stage")
+    submit.add_argument("--scene-id", type=int)
+    submit.add_argument("--resource", default="cpu")
 
-    submit_cmd = sub.add_parser("submit")
-    submit_cmd.add_argument("project_id")
-    submit_cmd.add_argument("stage")
-    submit_cmd.add_argument("--scene", type=int)
-    submit_cmd.add_argument("--resource", choices=sorted(VALID_RESOURCES), default="cpu")
+    list_cmd = sub.add_parser("list")
+    list_cmd.add_argument("--project-id")
+    list_cmd.add_argument("--state")
+
+    retry = sub.add_parser("retry")
+    retry.add_argument("task_id")
+
+    cancel = sub.add_parser("cancel")
+    cancel.add_argument("task_id")
 
     args = parser.parse_args()
-    if args.db:
-        db_path = Path(args.db).expanduser().resolve()
-    else:
-        output_root = Path(os.getenv("CSP_OUTPUT_DIR", str(ROOT / "output"))).expanduser().resolve()
-        db_path = output_root / "csp-studio.db"
-
-    with StudioStore(db_path) as store:
+    with StudioStore(args.db) as store:
         engine = TaskEngine(store)
-        if args.command == "list":
-            for task in engine.list(args.project, args.state):
-                scene = f" scene={task.scene_id}" if task.scene_id is not None else ""
-                print(f"{task.task_id} {task.state:9s} {task.progress:3d}% {task.resource:7s} {task.stage}{scene}")
-        elif args.command == "submit":
-            task = engine.submit(args.project_id, args.stage, scene_id=args.scene, resource=args.resource)
-            print(task.task_id)
+        if args.command == "submit":
+            print(json.dumps(engine.submit(args.project_id, args.stage, scene_id=args.scene_id, resource=args.resource).to_dict(), ensure_ascii=False, indent=2))
+        elif args.command == "list":
+            print(json.dumps([task.to_dict() for task in engine.list(args.project_id, args.state)], ensure_ascii=False, indent=2))
+        elif args.command == "retry":
+            print(json.dumps(engine.retry(args.task_id).to_dict(), ensure_ascii=False, indent=2))
+        elif args.command == "cancel":
+            print(json.dumps(engine.cancel(args.task_id).to_dict(), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

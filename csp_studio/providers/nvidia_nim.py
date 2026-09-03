@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import base64
 import mimetypes
-import os
 from pathlib import Path
 from typing import Any, Sequence
 
 import httpx
 
+from ..local_env import get_local_setting, setting_source
 from .base import ProviderError, ProviderResponse
 
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -39,8 +39,8 @@ def _clean_api_key(value: str | None) -> str | None:
     return cleaned
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
+def _setting_float(name: str, default: float) -> float:
+    raw = get_local_setting(name)
     if raw is None or not raw.strip():
         return default
     try:
@@ -52,8 +52,8 @@ def _env_float(name: str, default: float) -> float:
     return value
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
+def _setting_int(name: str, default: int) -> int:
+    raw = get_local_setting(name)
     if raw is None or not raw.strip():
         return default
     try:
@@ -75,6 +75,21 @@ def _migrate_retired_embed_model(value: str) -> str:
     return RETIRED_EMBED_MODELS.get(cleaned, cleaned)
 
 
+def nvidia_nim_status() -> dict[str, Any]:
+    """Return non-secret provider configuration diagnostics."""
+
+    api_key = _clean_api_key(get_local_setting("NVIDIA_API_KEY"))
+    return {
+        "provider": "nvidia_nim",
+        "configured": bool(api_key),
+        "api_key_source": setting_source("NVIDIA_API_KEY"),
+        "base_url": (get_local_setting("NVIDIA_NIM_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL).strip().rstrip("/"),
+        "chat_model": _migrate_retired_chat_model(get_local_setting("CSP_NIM_MODEL", DEFAULT_CHAT_MODEL) or DEFAULT_CHAT_MODEL),
+        "vision_model": (get_local_setting("CSP_NIM_VISION_MODEL", DEFAULT_VISION_MODEL) or DEFAULT_VISION_MODEL).strip(),
+        "embed_model": _migrate_retired_embed_model(get_local_setting("CSP_NIM_EMBED_MODEL", DEFAULT_EMBED_MODEL) or DEFAULT_EMBED_MODEL),
+    }
+
+
 class NvidiaNimProvider:
     name = "nvidia_nim"
 
@@ -89,22 +104,24 @@ class NvidiaNimProvider:
         timeout: float | None = None,
         vision_timeout: float | None = None,
         vision_retries: int | None = None,
+        structured_json: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
-        self.api_key = _clean_api_key(api_key if api_key is not None else os.getenv("NVIDIA_API_KEY"))
-        self.base_url = (base_url or os.getenv("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
-        self.chat_model = _migrate_retired_chat_model(chat_model or os.getenv("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL)
-        self.vision_model = (vision_model or os.getenv("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL).strip()
+        self.api_key = _clean_api_key(api_key if api_key is not None else get_local_setting("NVIDIA_API_KEY"))
+        self.base_url = (base_url or get_local_setting("NVIDIA_NIM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
+        self.chat_model = _migrate_retired_chat_model(chat_model or get_local_setting("CSP_NIM_MODEL") or DEFAULT_CHAT_MODEL)
+        self.vision_model = (vision_model or get_local_setting("CSP_NIM_VISION_MODEL") or DEFAULT_VISION_MODEL).strip()
         self.embed_model = _migrate_retired_embed_model(
-            embed_model or os.getenv("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL
+            embed_model or get_local_setting("CSP_NIM_EMBED_MODEL") or DEFAULT_EMBED_MODEL
         )
-        self.timeout = float(timeout if timeout is not None else _env_float("CSP_NIM_TIMEOUT", DEFAULT_TIMEOUT))
+        self.timeout = float(timeout if timeout is not None else _setting_float("CSP_NIM_TIMEOUT", DEFAULT_TIMEOUT))
         self.vision_timeout = float(
-            vision_timeout if vision_timeout is not None else _env_float("CSP_NIM_VISION_TIMEOUT", DEFAULT_VISION_TIMEOUT)
+            vision_timeout if vision_timeout is not None else _setting_float("CSP_NIM_VISION_TIMEOUT", DEFAULT_VISION_TIMEOUT)
         )
         self.vision_retries = int(
-            vision_retries if vision_retries is not None else _env_int("CSP_NIM_VISION_RETRIES", DEFAULT_VISION_RETRIES)
+            vision_retries if vision_retries is not None else _setting_int("CSP_NIM_VISION_RETRIES", DEFAULT_VISION_RETRIES)
         )
+        self.structured_json = bool(structured_json)
         if self.timeout <= 0 or self.vision_timeout <= 0:
             raise ProviderError("NIM timeouts must be greater than zero")
         if self.vision_retries < 0:
@@ -187,6 +204,9 @@ class NvidiaNimProvider:
             "max_tokens": int(max_tokens),
             "stream": False,
         }
+        if self.structured_json:
+            payload["response_format"] = {"type": "json_object"}
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         data = self._post(
             "chat/completions",
             payload,

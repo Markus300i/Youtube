@@ -11,11 +11,15 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .action_api import router as action_router
 from .asset_manager import AssetManager, VALID_SCENE_STATUSES
+from .flow_api import router as flow_router
 from .models import ShotPlan
+from .ops_api import router as ops_router
 from .scene_ops import SUPPORTED_IMAGE_EXTENSIONS, SceneOperations
 from .shot_director import ShotDirector
 from .store import StudioStore
+from .task_engine import TaskEngine
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -63,7 +67,10 @@ MOTION_TYPES = {
     "micro_handheld",
 }
 
-app = FastAPI(title="CSP Studio", version="0.2.0")
+app = FastAPI(title="CSP Studio", version="0.6.0")
+app.include_router(ops_router)
+app.include_router(action_router)
+app.include_router(flow_router)
 
 
 class ShotPlanUpdate(BaseModel):
@@ -292,14 +299,35 @@ def approve(project_id: str, scene_id: int, note: str = Form("Approved in CSP St
 
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/regenerate")
-def regenerate(project_id: str, scene_id: int, note: str = Form("Marked in CSP Studio GUI")):
+def regenerate(project_id: str, scene_id: int, note: str = Form("Regenerate requested in CSP Studio GUI")):
     with StudioStore(DB_PATH) as store:
         ops = SceneOperations(store, _images_dir(store, project_id))
         try:
             ops.mark_for_regeneration(project_id, scene_id, note)
-        except KeyError as exc:
+            engine = TaskEngine(store)
+            existing = [
+                task for task in engine.list(project_id)
+                if task.scene_id == scene_id and task.stage == "regenerate_image" and task.state in {"queued", "running"}
+            ]
+            if existing:
+                task = existing[0]
+                queued = False
+            else:
+                task = engine.submit(
+                    project_id,
+                    "regenerate_image",
+                    scene_id=scene_id,
+                    resource="gpu",
+                    payload={"source": "scene_regenerate_button", "scene_id": scene_id},
+                )
+                queued = True
+        except (KeyError, RuntimeError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
-        return _scene_payload(store, project_id, scene_id)
+        return {
+            "queued": queued,
+            "task": task.to_dict(),
+            "scene": _scene_payload(store, project_id, scene_id),
+        }
 
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/status")

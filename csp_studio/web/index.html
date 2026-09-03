@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>CSP Studio</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=0.6.3" />
 </head>
 <body>
   <header class="topbar">
@@ -18,21 +18,48 @@
     </div>
   </header>
 
-  <main class="layout">
-    <section class="scene-browser">
-      <div class="section-head">
-        <div>
-          <div class="eyebrow">PROJECT SCENES</div>
-          <h2>Sceny</h2>
-        </div>
-        <div id="projectMeta" class="muted"></div>
+  <nav class="view-tabs" aria-label="Widoki CSP Studio">
+    <button class="view-tab active" data-view="dashboard">Agent One</button>
+    <button class="view-tab" data-view="scenes">Sceny</button>
+    <button class="view-tab" data-view="tasks">Tasks</button>
+  </nav>
+
+  <main>
+    <section id="dashboardView" class="view dashboard-view">
+      <div id="opsDashboard" class="dashboard-shell">
+        <div class="empty-state">Ładowanie Agent One…</div>
       </div>
-      <div id="sceneGrid" class="scene-grid"></div>
     </section>
 
-    <aside id="scenePanel" class="scene-panel empty">
-      <div class="empty-state">Wybierz scenę.</div>
-    </aside>
+    <section id="scenesView" class="view hidden">
+      <div class="layout">
+        <section class="scene-browser">
+          <div class="section-head">
+            <div>
+              <div class="eyebrow">PROJECT SCENES</div>
+              <h2>Review scen</h2>
+            </div>
+            <div id="projectMeta" class="muted"></div>
+          </div>
+          <div id="sceneGrid" class="scene-grid"></div>
+        </section>
+
+        <aside id="scenePanel" class="scene-panel empty">
+          <div class="empty-state">Wybierz scenę.</div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="tasksView" class="view hidden tasks-view">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">TASK ENGINE</div>
+          <h2>Kolejka produkcyjna</h2>
+        </div>
+        <div class="muted">Trwały stan z csp-studio.db</div>
+      </div>
+      <div id="taskPanel" class="task-list"></div>
+    </section>
   </main>
 
   <dialog id="historyDialog">
@@ -46,7 +73,24 @@
     <div id="historyContent"></div>
   </dialog>
 
+  <dialog id="taskLogDialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow">TASK LOG</div>
+        <h2 id="taskLogTitle">Log zadania</h2>
+      </div>
+      <div class="dialog-actions">
+        <button id="refreshTaskLog" class="ghost">Odśwież log</button>
+        <button id="closeTaskLog" class="ghost">Zamknij</button>
+      </div>
+    </div>
+    <div id="taskLogContent"></div>
+  </dialog>
+
   <div id="toast" class="toast"></div>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=0.6.3"></script>
+  <script src="/actions.js?v=0.6.3"></script>
+  <script src="/flow.js?v=0.6.3"></script>
+  <script src="/flow-v2.js?v=0.6.3"></script>
 </body>
 </html>
