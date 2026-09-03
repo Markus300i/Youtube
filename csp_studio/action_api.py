@@ -249,6 +249,8 @@ def action_statuses(store: StudioStore, project_id: str, *, report=None) -> list
 
 
 def run_quick_regenerate(task_id: str) -> dict[str, Any]:
+    """Legacy direct helper retained for compatibility; API routes no longer call it."""
+
     log_path = OUTPUT_ROOT / ".studio-tasks" / f"{task_id}.log"
     deadline = time.time() + 7200
 
@@ -373,10 +375,9 @@ def quick_regenerate(project_id: str, scene_id: int, background_tasks: Backgroun
             "regenerate_image_quick",
             scene_id=scene_id,
             resource="gpu",
-            payload={"mode": "quick", "model": "z-image-turbo"},
+            payload={"mode": "quick", "model": "z-image-turbo", "source": "studio_worker"},
         )
-    background_tasks.add_task(run_quick_regenerate, task.task_id)
-    return {"scheduled": True, "task": task.to_dict()}
+    return {"scheduled": True, "execution": "studio_worker", "task": task.to_dict()}
 
 
 @router.post("/api/projects/{project_id}/actions/{action}")
@@ -404,8 +405,7 @@ def manual_action(project_id: str, action: str, background_tasks: BackgroundTask
             project_id,
             stage,
             resource=resource,
-            payload={"source": "manual-actions-panel"},
+            payload={"source": "manual-actions-panel", "execution": "studio_worker"},
         )
 
-    background_tasks.add_task(run_task_waiting, task.task_id, db_path=DB_PATH, output_root=OUTPUT_ROOT)
-    return {"scheduled": True, "task": task.to_dict(), "action": status}
+    return {"scheduled": True, "execution": "studio_worker", "task": task.to_dict(), "action": status}
