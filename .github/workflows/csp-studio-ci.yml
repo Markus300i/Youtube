@@ -46,6 +46,7 @@ jobs:
             tests.test_csp_visual_qa_placeholders \
             tests.test_csp_agent_memory \
             tests.test_csp_studio_worker \
+            tests.test_csp_worker_execution_plane \
             tests.test_csp_production_run \
             tests.test_csp_new_short_wizard \
             tests.test_csp_wizard_v2 \
