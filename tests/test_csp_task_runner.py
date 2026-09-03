@@ -57,6 +57,7 @@ class StudioTaskRunnerTests(unittest.TestCase):
             SUPPORTED_STAGES,
             {
                 "regenerate_image",
+                "regenerate_image_quick",
                 "tts",
                 "captions",
                 "sound_design",
