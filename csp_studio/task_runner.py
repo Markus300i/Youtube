@@ -25,6 +25,7 @@ DEFAULT_DB_PATH = Path(os.getenv("CSP_STUDIO_DB", str(DEFAULT_OUTPUT_ROOT / "csp
 
 SUPPORTED_STAGES = {
     "regenerate_image",
+    "regenerate_image_quick",
     "tts",
     "captions",
     "sound_design",
@@ -40,6 +41,27 @@ def _slug(value: str) -> str:
 
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-zA-Z0-9]+", "-", ascii_value).strip("-").lower() or "project"
+
+
+def _quick_snapshot(base_snapshot: Path, scene_id: int, target: Path) -> Path:
+    """Derive a Quick Draft snapshot without mutating canonical project data."""
+
+    payload = yaml.safe_load(base_snapshot.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid Studio snapshot")
+    payload["image_model"] = "z-image-turbo"
+    matched = False
+    for scene in payload.get("scenes") or []:
+        if not isinstance(scene, dict) or int(scene.get("id", 0)) != scene_id:
+            continue
+        scene["render"] = {"mode": "generate"}
+        matched = True
+        break
+    if not matched:
+        raise KeyError(f"Scene {scene_id} missing from snapshot")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return target
 
 
 class StudioTaskRunner:
@@ -100,13 +122,20 @@ class StudioTaskRunner:
                 raise KeyError(f"Unknown project: {task.project_id}")
             engine.progress(task_id, 5, stage="prepare")
             snapshot = None
-            if task.stage in {"regenerate_image", "tts", "captions", "sound_design", "render_final"}:
+            if task.stage in {"regenerate_image", "regenerate_image_quick", "tts", "captions", "sound_design", "render_final"}:
                 snapshot = self._write_snapshot(store, task.project_id)
 
-        if task.stage == "regenerate_image":
+        if task.stage in {"regenerate_image", "regenerate_image_quick"}:
             if task.scene_id is None:
-                raise ValueError("regenerate_image requires scene_id")
-            return self._regenerate_scene(task_id, task.project_id, task.scene_id, snapshot, log_path)
+                raise ValueError(f"{task.stage} requires scene_id")
+            return self._regenerate_scene(
+                task_id,
+                task.project_id,
+                task.scene_id,
+                snapshot,
+                log_path,
+                quick=task.stage == "regenerate_image_quick",
+            )
 
         commands = {
             "tts": [self.python, str(ROOT / "scripts" / "generate_tts.py"), str(snapshot)],
@@ -203,6 +232,8 @@ class StudioTaskRunner:
         scene_id: int,
         snapshot: Path | None,
         log_path: Path,
+        *,
+        quick: bool = False,
     ) -> dict[str, Any]:
         if snapshot is None:
             raise RuntimeError("Missing project snapshot")
@@ -228,43 +259,50 @@ class StudioTaskRunner:
                     "ComfyUI could not be started. Start it manually or set CSP_COMFYUI_PATH / CSP_COMFY_PYTHON."
                 )
 
-        with tempfile.TemporaryDirectory(prefix="csp-studio-regen-") as tmp:
-            temp_output = Path(tmp) / "output"
+        with tempfile.TemporaryDirectory(prefix="csp-studio-quick-" if quick else "csp-studio-regen-") as tmp:
+            tmp_root = Path(tmp)
+            temp_output = tmp_root / "output"
             env = dict(base_env)
             env["CSP_OUTPUT_DIR"] = str(temp_output)
+            run_snapshot = _quick_snapshot(snapshot, scene_id, tmp_root / "quick.yaml") if quick else snapshot
+            copied_refs: list[int] = []
 
             with StudioStore(self.db_path) as store:
                 project = store.conn.execute("SELECT title FROM projects WHERE project_id=?", (project_id,)).fetchone()
                 if project is None:
                     raise KeyError(project_id)
                 slug = f"{project_id}-{_slug(project['title'])}"
-                real_images = self.output_root / slug / "images"
-                sandbox_images = temp_output / slug / "images"
-                sandbox_images.mkdir(parents=True, exist_ok=True)
-                copied_refs: list[int] = []
-                for scene in store.list_scenes(project_id):
-                    if scene.scene_id == scene_id:
-                        continue
-                    source = real_images / f"scene-{scene.scene_id:02d}.png"
-                    if not source.is_file() or source.stat().st_size <= 0:
-                        continue
-                    shutil.copy2(source, sandbox_images / source.name)
-                    copied_refs.append(scene.scene_id)
-                TaskEngine(store).progress(task_id, 15, stage="prepare_references")
+                if not quick:
+                    real_images = self.output_root / slug / "images"
+                    sandbox_images = temp_output / slug / "images"
+                    sandbox_images.mkdir(parents=True, exist_ok=True)
+                    for scene in store.list_scenes(project_id):
+                        if scene.scene_id == scene_id:
+                            continue
+                        source = real_images / f"scene-{scene.scene_id:02d}.png"
+                        if not source.is_file() or source.stat().st_size <= 0:
+                            continue
+                        shutil.copy2(source, sandbox_images / source.name)
+                        copied_refs.append(scene.scene_id)
+                TaskEngine(store).progress(task_id, 15, stage="prepare_quick" if quick else "prepare_references")
 
             with log_path.open("a", encoding="utf-8", errors="replace") as log:
-                log.write(
-                    "REFERENCE SCENES COPIED: "
-                    + (", ".join(str(item) for item in copied_refs) if copied_refs else "none")
-                    + "\n"
-                )
+                if quick:
+                    log.write("QUICK MODE: z-image-turbo, render.mode=generate, reference rendering bypassed\n")
+                else:
+                    log.write(
+                        "REFERENCE SCENES COPIED: "
+                        + (", ".join(str(item) for item in copied_refs) if copied_refs else "none")
+                        + "\n"
+                    )
 
-            command = [self.python, str(ROOT / "scripts" / "generate_scene.py"), str(snapshot), str(scene_id)]
+            command = [self.python, str(ROOT / "scripts" / "generate_scene.py"), str(run_snapshot), str(scene_id)]
             with StudioStore(self.db_path) as store:
-                TaskEngine(store).progress(task_id, 20, stage="generate_image")
+                TaskEngine(store).progress(task_id, 20, stage="quick_generate" if quick else "generate_image")
             returncode = self._run_process(task_id, command, log_path, env=env)
             if returncode != 0:
-                raise RuntimeError(f"Scene generator exited with code {returncode}")
+                label = "Quick scene generator" if quick else "Scene generator"
+                raise RuntimeError(f"{label} exited with code {returncode}")
 
             with StudioStore(self.db_path) as store:
                 project = store.conn.execute("SELECT title FROM projects WHERE project_id=?", (project_id,)).fetchone()
@@ -280,22 +318,29 @@ class StudioTaskRunner:
                     project_id,
                     scene_id,
                     generated,
-                    source="local-comfy-regenerate",
-                    note="Generated from CSP Studio Regenerate action",
+                    source="local-zimage-quick" if quick else "local-comfy-regenerate",
+                    note="Quick Regenerate from CSP Studio" if quick else "Generated from CSP Studio Regenerate action",
                 )
                 invalidate_after_image_change(
                     engine,
                     project_id,
                     scene_id=scene_id,
-                    reason=f"scene {scene_id} regenerated by task {task_id}",
+                    reason=(
+                        f"scene {scene_id} quick regenerated by task {task_id}"
+                        if quick
+                        else f"scene {scene_id} regenerated by task {task_id}"
+                    ),
                 )
-                return {
+                result: dict[str, Any] = {
                     "returncode": returncode,
                     "log_path": str(log_path),
                     "command": self._display_command(command),
                     "reference_scenes": copied_refs,
                     "asset": asset.to_dict(),
                 }
+                if quick:
+                    result.update({"mode": "quick", "model": "z-image-turbo"})
+                return result
 
     def _write_snapshot(self, store: StudioStore, project_id: str) -> Path:
         project = store.conn.execute("SELECT * FROM projects WHERE project_id=?", (project_id,)).fetchone()
