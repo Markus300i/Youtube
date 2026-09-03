@@ -7,15 +7,14 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 
-from .action_api import action_statuses, run_quick_regenerate
+from .action_api import action_statuses
 from .agent_one import AgentOne
 from .comfy_control import interrupt_comfyui
 from .log_safety import DEFAULT_LOG_TAIL_BYTES, read_redacted_log_tail
 from .store import StudioStore
-from .task_engine import StudioTask, TaskEngine
-from .task_runner import run_task_waiting
+from .task_engine import TaskEngine
 from .universe_memory import UniverseMemory
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,18 +103,6 @@ def _memory_status(store: StudioStore, project_id: str) -> dict[str, Any]:
     }
 
 
-def _schedule(background_tasks: BackgroundTasks, task: StudioTask) -> None:
-    if task.stage == "regenerate_image_quick":
-        background_tasks.add_task(run_quick_regenerate, task.task_id)
-    else:
-        background_tasks.add_task(
-            run_task_waiting,
-            task.task_id,
-            db_path=DB_PATH,
-            output_root=OUTPUT_ROOT,
-        )
-
-
 def _task_log_path(task_id: str) -> Path:
     path = (TASK_LOG_DIR / f"{task_id}.log").resolve()
     try:
@@ -169,7 +156,9 @@ def enqueue_next(project_id: str):
 
 
 @router.post("/api/tasks/{task_id}/run")
-def run_queued_task(task_id: str, background_tasks: BackgroundTasks):
+def run_queued_task(task_id: str):
+    """Keep a queued task durable; Studio Worker is the sole executor."""
+
     with StudioStore(DB_PATH) as store:
         engine = TaskEngine(store)
         task = engine.get(task_id)
@@ -177,8 +166,7 @@ def run_queued_task(task_id: str, background_tasks: BackgroundTasks):
             raise HTTPException(404, f"Unknown task: {task_id}")
         if task.state != "queued":
             raise HTTPException(400, f"Task {task_id} is {task.state}, expected queued")
-        _schedule(background_tasks, task)
-        return {"scheduled": True, "task": task.to_dict()}
+        return {"scheduled": True, "execution": "studio_worker", "task": task.to_dict()}
 
 
 @router.get("/api/tasks/{task_id}/log")
@@ -196,15 +184,14 @@ def task_log(task_id: str):
 
 
 @router.post("/api/tasks/{task_id}/retry")
-def retry_task(task_id: str, background_tasks: BackgroundTasks):
+def retry_task(task_id: str):
     with StudioStore(DB_PATH) as store:
         engine = TaskEngine(store)
         try:
             task = engine.retry(task_id)
         except (KeyError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
-        _schedule(background_tasks, task)
-        return {"scheduled": True, "task": task.to_dict()}
+        return {"scheduled": True, "execution": "studio_worker", "task": task.to_dict()}
 
 
 @router.post("/api/tasks/{task_id}/cancel")
